@@ -76,11 +76,16 @@ type SyftArtifact struct {
 	Version   string                 `json:"version"`
 	Type      string                 `json:"type"`
 	PURL      string                 `json:"purl"`
-	CPEs      []string               `json:"cpes"`
+	CPEs      []SyftCPE              `json:"cpes"`
 	Language  string                 `json:"language"`
 	Licenses  []string               `json:"licenses"`
 	Locations []SyftLocation         `json:"locations"`
 	Metadata  map[string]interface{} `json:"metadata"`
+}
+
+type SyftCPE struct {
+	CPE    string `json:"cpe"`
+	Source string `json:"source"`
 }
 
 type SyftLocation struct {

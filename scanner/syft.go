@@ -65,7 +65,7 @@ func (s *SyftScanner) GenerateSBOM(ctx context.Context, targetPath string, optio
 
 	// Build Syft command
 	args := []string{
-		"packages",
+		"scan",
 		targetPath,
 		"-o", fmt.Sprintf("%s=%s", options.OutputFormat, outputFile),
 	}
@@ -78,18 +78,13 @@ func (s *SyftScanner) GenerateSBOM(ctx context.Context, targetPath string, optio
 		args = append(args, "--platform", options.Platform)
 	}
 	if len(options.Catalogers) > 0 {
-		args = append(args, "--catalogers", strings.Join(options.Catalogers, ","))
+		args = append(args, "--select-catalogers", strings.Join(options.Catalogers, ","))
 	}
 	if options.Quiet {
 		args = append(args, "--quiet")
 	}
 	if options.Verbose {
 		args = append(args, "--verbose")
-	}
-
-	// Set cache directory if specified
-	if s.cacheDir != "" {
-		args = append(args, "--cache-dir", s.cacheDir)
 	}
 
 	// Create command with timeout
@@ -183,7 +178,7 @@ func (s *SyftScanner) ParseSBOMToComponents(sbom *models.SBOM) ([]*models.Compon
 
 		// Set CPE if available
 		if len(artifact.CPEs) > 0 {
-			component.CPE = artifact.CPEs[0] // Use first CPE
+			component.CPE = artifact.CPEs[0].CPE // Use first CPE's cpe field
 		}
 
 		// Convert locations

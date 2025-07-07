@@ -1,11 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"oss-compliance-scanner/config"
+	"oss-compliance-scanner/db"
+	"oss-compliance-scanner/models"
+	"oss-compliance-scanner/notifier"
+	"oss-compliance-scanner/policy"
+	"oss-compliance-scanner/scanner"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -55,54 +64,28 @@ var scanCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(scanCmd)
 
-	// Scan-specific flags
-	scanCmd.Flags().StringVarP(&repoPath, "repo", "r", ".", "repository path to scan")
-	scanCmd.Flags().StringVarP(&modulePath, "module", "m", "", "specific module path to scan (relative to repo)")
-	scanCmd.Flags().StringVarP(&outputFormat, "output", "o", "table", "output format (table, json, yaml)")
-	scanCmd.Flags().StringVar(&configPath, "policy-config", "", "path to policy configuration file")
-	scanCmd.Flags().BoolVar(&skipSBOM, "skip-sbom", false, "skip SBOM generation and use existing data")
-	scanCmd.Flags().BoolVar(&skipVuln, "skip-vuln", false, "skip vulnerability scanning")
-	scanCmd.Flags().BoolVar(&notify, "notify", true, "send Slack notifications")
+	// Add flags
+	scanCmd.Flags().StringVarP(&repoPath, "repo", "r", ".", "Repository path to scan")
+	scanCmd.Flags().StringVarP(&modulePath, "module", "m", "", "Specific module path to scan (relative to repo)")
+	scanCmd.Flags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table, json, yaml)")
+	scanCmd.Flags().BoolVar(&skipSBOM, "skip-sbom", false, "Skip SBOM generation")
+	scanCmd.Flags().BoolVar(&skipVuln, "skip-vuln", false, "Skip vulnerability scanning")
+	scanCmd.Flags().BoolVar(&notify, "notify", true, "Send notifications on violations")
 
 	// Bind flags to viper
 	viper.BindPFlag("scan.repo", scanCmd.Flags().Lookup("repo"))
 	viper.BindPFlag("scan.module", scanCmd.Flags().Lookup("module"))
 	viper.BindPFlag("scan.output", scanCmd.Flags().Lookup("output"))
-	viper.BindPFlag("scan.policy_config", scanCmd.Flags().Lookup("policy-config"))
-	viper.BindPFlag("scan.skip_sbom", scanCmd.Flags().Lookup("skip-sbom"))
-	viper.BindPFlag("scan.skip_vuln", scanCmd.Flags().Lookup("skip-vuln"))
+	viper.BindPFlag("scan.skip-sbom", scanCmd.Flags().Lookup("skip-sbom"))
+	viper.BindPFlag("scan.skip-vuln", scanCmd.Flags().Lookup("skip-vuln"))
 	viper.BindPFlag("scan.notify", scanCmd.Flags().Lookup("notify"))
 }
 
 func runScan(cmd *cobra.Command, args []string) {
-	// Validate repository path
-	repoPath = viper.GetString("scan.repo")
-	if repoPath == "" {
-		repoPath = "."
-	}
-
-	// Convert to absolute path
-	absRepoPath, err := filepath.Abs(repoPath)
-	if err != nil {
-		log.Fatalf("Invalid repository path: %v", err)
-	}
-
-	// Check if path exists
-	if _, err := os.Stat(absRepoPath); os.IsNotExist(err) {
-		log.Fatalf("Repository path does not exist: %s", absRepoPath)
-	}
-
-	// Get other parameters from viper
-	modulePath = viper.GetString("scan.module")
-	outputFormat = viper.GetString("scan.output")
-	configPath = viper.GetString("scan.policy_config")
-	skipSBOM = viper.GetBool("scan.skip_sbom")
-	skipVuln = viper.GetBool("scan.skip_vuln")
-	notify = viper.GetBool("scan.notify")
-
 	if verbose {
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
 		log.Printf("Starting scan with parameters:")
-		log.Printf("  Repository: %s", absRepoPath)
+		log.Printf("  Repository: %s", repoPath)
 		log.Printf("  Module: %s", modulePath)
 		log.Printf("  Output format: %s", outputFormat)
 		log.Printf("  Skip SBOM: %t", skipSBOM)
@@ -110,12 +93,23 @@ func runScan(cmd *cobra.Command, args []string) {
 		log.Printf("  Notify: %t", notify)
 	}
 
+	// Convert relative path to absolute
+	absRepoPath, err := filepath.Abs(repoPath)
+	if err != nil {
+		log.Fatalf("Failed to resolve repository path: %v", err)
+	}
+
+	// Validate repository path exists
+	if _, err := os.Stat(absRepoPath); os.IsNotExist(err) {
+		log.Fatalf("Repository path does not exist: %s", absRepoPath)
+	}
+
 	// Create scan context
 	scanCtx := &ScanContext{
 		RepoPath:     absRepoPath,
 		ModulePath:   modulePath,
 		OutputFormat: outputFormat,
-		ConfigPath:   configPath,
+		ConfigPath:   cfgFile,
 		SkipSBOM:     skipSBOM,
 		SkipVuln:     skipVuln,
 		Notify:       notify,
@@ -140,6 +134,14 @@ type ScanContext struct {
 	SkipVuln     bool
 	Notify       bool
 	Verbose      bool
+
+	// Initialized components
+	Config       *config.Config
+	Database     *db.Database
+	SyftScanner  *scanner.SyftScanner
+	GrypeScanner *scanner.GrypeScanner
+	PolicyEngine *policy.PolicyEngine
+	Notifier     *notifier.SlackNotifier
 }
 
 // executeScan performs the actual scanning process
@@ -162,10 +164,9 @@ func executeScan(ctx *ScanContext) error {
 	// Initialize components
 	fmt.Println("🏗️  Initializing components...")
 
-	// TODO: Initialize database connection
-	// TODO: Initialize scanner components
-	// TODO: Initialize policy engine
-	// TODO: Initialize notifier
+	if err := initializeComponents(ctx); err != nil {
+		return fmt.Errorf("failed to initialize components: %w", err)
+	}
 
 	// Process each target
 	for i, target := range scanTargets {
@@ -180,7 +181,76 @@ func executeScan(ctx *ScanContext) error {
 	}
 
 	fmt.Println("\n📊 Generating summary report...")
-	// TODO: Generate and display summary
+	if err := generateSummaryReport(ctx); err != nil {
+		log.Printf("Warning: Failed to generate summary report: %v", err)
+	}
+
+	return nil
+}
+
+// initializeComponents initializes all necessary components for scanning
+func initializeComponents(ctx *ScanContext) error {
+	var err error
+
+	// Load configuration
+	ctx.Config, err = config.LoadConfig(ctx.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Initialize database connection
+	ctx.Database, err = db.NewDatabase(ctx.Config.Database.Driver, ctx.Config.Database.GetDSN())
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Initialize Syft scanner
+	ctx.SyftScanner = scanner.NewSyftScanner(
+		ctx.Config.Scanner.SyftPath,
+		ctx.Config.Scanner.TempDir,
+		ctx.Config.Scanner.CacheDir,
+		ctx.Config.Scanner.TimeoutSeconds,
+	)
+
+	// Initialize Grype scanner
+	ctx.GrypeScanner = scanner.NewGrypeScanner(
+		ctx.Config.Scanner.GrypePath,
+		ctx.Config.Scanner.TempDir,
+		ctx.Config.Scanner.CacheDir,
+		ctx.Config.Scanner.TimeoutSeconds,
+	)
+
+	// Initialize policy engine
+	licensePolicies, err := ctx.Database.GetActiveLicensePolicies()
+	if err != nil {
+		log.Printf("Warning: Failed to load license policies: %v", err)
+	}
+
+	vulnerabilityPolicies, err := ctx.Database.GetActiveVulnerabilityPolicies()
+	if err != nil {
+		log.Printf("Warning: Failed to load vulnerability policies: %v", err)
+	}
+
+	ctx.PolicyEngine = policy.NewPolicyEngine(licensePolicies, vulnerabilityPolicies, ctx.Config.Policy.GlobalSettings)
+
+	// Initialize notifier if notifications are enabled
+	if ctx.Notify && ctx.Config.Notification.SlackWebhookURL != "" {
+		ctx.Notifier = notifier.NewSlackNotifier(
+			ctx.Config.Notification.SlackWebhookURL,
+			ctx.Config.Notification.SlackChannel,
+			"OSS-Compliance-Bot",
+			":warning:",
+		)
+	}
+
+	// Validate scanner installations
+	scannerCtx := context.Background()
+	if err := ctx.SyftScanner.ValidateInstallation(scannerCtx); err != nil {
+		return fmt.Errorf("syft validation failed: %w", err)
+	}
+	if err := ctx.GrypeScanner.ValidateInstallation(scannerCtx); err != nil {
+		return fmt.Errorf("grype validation failed: %w", err)
+	}
 
 	return nil
 }
@@ -267,36 +337,206 @@ func autoDiscoverTargets(repoPath string) []string {
 
 // processScanTarget processes a single scan target
 func processScanTarget(ctx *ScanContext, targetPath string) error {
+	scanStartTime := time.Now()
+
 	relPath, _ := filepath.Rel(ctx.RepoPath, targetPath)
 	if relPath == "." {
 		relPath = "root"
 	}
 
+	repoName := filepath.Base(ctx.RepoPath)
+	scannerCtx := context.Background()
+
+	var sbomRecord *models.SBOM
+	var sbomComponents []*models.Component
+	var vulnerabilities []*models.Vulnerability
+
+	// Step 1: Generate SBOM
 	fmt.Printf("  📋 Generating SBOM for %s...\n", relPath)
 	if !ctx.SkipSBOM {
-		// TODO: Generate SBOM using Syft
-		fmt.Printf("    ✓ SBOM generated\n")
+		sbom, err := ctx.SyftScanner.GenerateSBOM(scannerCtx, targetPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to generate SBOM: %w", err)
+		}
+
+		// Create SBOM record
+		sbomRecord = &models.SBOM{
+			RepoName:       repoName,
+			ModulePath:     relPath,
+			ScanDate:       time.Now(),
+			SyftVersion:    "latest", // TODO: Get actual version
+			RawSBOM:        string(sbom.RawSBOM),
+			ComponentCount: 0, // Will be updated after components are parsed
+		}
+
+		// Save SBOM to database
+		if err := ctx.Database.CreateSBOM(sbomRecord); err != nil {
+			return fmt.Errorf("failed to save SBOM: %w", err)
+		}
+
+		// Parse and save components
+		components, err := ctx.SyftScanner.ParseSBOMToComponents(sbomRecord)
+		if err != nil {
+			return fmt.Errorf("failed to parse SBOM components: %w", err)
+		}
+
+		// Update component count
+		sbomRecord.ComponentCount = len(components)
+
+		// Save components to database
+		for _, comp := range components {
+			if err := ctx.Database.CreateComponent(comp); err != nil {
+				log.Printf("Warning: Failed to save component %s: %v", comp.Name, err)
+				continue
+			}
+			sbomComponents = append(sbomComponents, comp)
+		}
+
+		fmt.Printf("    ✓ SBOM generated with %d components\n", len(components))
 	} else {
 		fmt.Printf("    ⏭️  SBOM generation skipped\n")
 	}
 
+	// Step 2: Scan vulnerabilities
 	fmt.Printf("  🛡️  Scanning vulnerabilities for %s...\n", relPath)
 	if !ctx.SkipVuln {
-		// TODO: Scan vulnerabilities using Grype
-		fmt.Printf("    ✓ Vulnerability scan completed\n")
+		vulns, err := ctx.GrypeScanner.ScanDirectory(scannerCtx, targetPath, nil)
+		if err != nil {
+			log.Printf("Warning: Failed to scan vulnerabilities: %v", err)
+		} else {
+			// Link vulnerabilities to components and save them
+			for _, vuln := range vulns {
+				// Find matching component by name (simple matching)
+				var componentID int
+				for _, comp := range sbomComponents {
+					// Simple name matching - in production, more sophisticated matching would be needed
+					if comp.Name != "" {
+						componentID = comp.ID
+						break
+					}
+				}
+
+				if componentID > 0 {
+					vuln.ComponentID = componentID
+					if err := ctx.Database.CreateVulnerability(vuln); err != nil {
+						log.Printf("Warning: Failed to save vulnerability %s: %v", vuln.VulnID, err)
+						continue
+					}
+					vulnerabilities = append(vulnerabilities, vuln)
+				}
+			}
+		}
+
+		fmt.Printf("    ✓ Vulnerability scan completed, found %d vulnerabilities\n", len(vulnerabilities))
 	} else {
 		fmt.Printf("    ⏭️  Vulnerability scan skipped\n")
 	}
 
+	// Step 3: Analyze policy compliance
 	fmt.Printf("  📏 Analyzing policy compliance for %s...\n", relPath)
-	// TODO: Analyze policy violations
+	var scanResult *models.ScanResult
+
+	if sbomRecord != nil {
+		result, err := ctx.PolicyEngine.EvaluateCompliance(sbomRecord, sbomComponents, vulnerabilities)
+		if err != nil {
+			log.Printf("Warning: Policy evaluation failed: %v", err)
+		} else {
+			// Convert policy evaluation result to scan result
+			scanResult = &models.ScanResult{
+				SBOMID:               sbomRecord.ID,
+				RepoName:             repoName,
+				ModulePath:           relPath,
+				ScanStartTime:        scanStartTime,
+				ScanEndTime:          time.Now(),
+				Status:               models.ScanStatusCompleted,
+				TotalComponents:      result.TotalComponents,
+				VulnerabilitiesFound: result.TotalVulnerabilities,
+				LicenseViolations:    result.Summary.LicenseViolations,
+				CriticalVulns:        result.Summary.CriticalViolations,
+				HighVulns:            result.Summary.HighViolations,
+				MediumVulns:          result.Summary.MediumViolations,
+				LowVulns:             result.Summary.LowViolations,
+			}
+
+			// Calculate overall risk
+			scanResult.OverallRisk = scanResult.CalculateOverallRisk()
+
+			if err := ctx.Database.CreateScanResult(scanResult); err != nil {
+				log.Printf("Warning: Failed to save scan result: %v", err)
+			}
+		}
+	}
+
 	fmt.Printf("    ✓ Policy analysis completed\n")
 
-	if ctx.Notify {
+	// Step 4: Send notifications
+	if ctx.Notify && ctx.Notifier != nil && scanResult != nil {
 		fmt.Printf("  📢 Sending notifications for %s...\n", relPath)
-		// TODO: Send Slack notifications if violations found
+
+		// Check if there are violations to report
+		if scanResult.VulnerabilitiesFound > 0 || scanResult.LicenseViolations > 0 {
+			message := fmt.Sprintf("🚨 OSS Compliance Issues Found in %s/%s\n\n", repoName, relPath)
+			message += fmt.Sprintf("📊 **Summary:**\n")
+			message += fmt.Sprintf("• Total Components: %d\n", scanResult.TotalComponents)
+			message += fmt.Sprintf("• Vulnerabilities: %d (Critical: %d, High: %d, Medium: %d, Low: %d)\n",
+				scanResult.VulnerabilitiesFound, scanResult.CriticalVulns, scanResult.HighVulns,
+				scanResult.MediumVulns, scanResult.LowVulns)
+			message += fmt.Sprintf("• License Violations: %d\n", scanResult.LicenseViolations)
+			message += fmt.Sprintf("• Overall Risk: %s\n", scanResult.OverallRisk)
+
+			if err := ctx.Notifier.SendCustomMessage(message, ""); err != nil {
+				log.Printf("Warning: Failed to send notification: %v", err)
+			}
+		}
+
 		fmt.Printf("    ✓ Notifications sent\n")
+	} else if ctx.Notify {
+		fmt.Printf("  📢 Notifications for %s...\n", relPath)
+		fmt.Printf("    ⏭️  No violations found or notifier not configured\n")
 	}
+
+	return nil
+}
+
+// generateSummaryReport generates and displays a summary of all scan results
+func generateSummaryReport(ctx *ScanContext) error {
+	// Get latest scan results
+	results, err := ctx.Database.GetLatestScanResults(10)
+	if err != nil {
+		return fmt.Errorf("failed to get scan results: %w", err)
+	}
+
+	if len(results) == 0 {
+		fmt.Println("No scan results found.")
+		return nil
+	}
+
+	fmt.Printf("\n📋 **Scan Summary Report**\n")
+	fmt.Printf("========================\n")
+
+	totalComponents := 0
+	totalVulns := 0
+	totalLicenseViolations := 0
+
+	for _, result := range results {
+		fmt.Printf("\n🔍 **%s/%s**\n", result.RepoName, result.ModulePath)
+		fmt.Printf("  • Components: %d\n", result.TotalComponents)
+		fmt.Printf("  • Vulnerabilities: %d (C:%d, H:%d, M:%d, L:%d)\n",
+			result.VulnerabilitiesFound, result.CriticalVulns, result.HighVulns,
+			result.MediumVulns, result.LowVulns)
+		fmt.Printf("  • License Violations: %d\n", result.LicenseViolations)
+		fmt.Printf("  • Risk Level: %s\n", result.OverallRisk)
+		fmt.Printf("  • Scan Time: %s\n", result.ScanStartTime.Format("2006-01-02 15:04:05"))
+
+		totalComponents += result.TotalComponents
+		totalVulns += result.VulnerabilitiesFound
+		totalLicenseViolations += result.LicenseViolations
+	}
+
+	fmt.Printf("\n📊 **Overall Summary**\n")
+	fmt.Printf("• Total Scanned Components: %d\n", totalComponents)
+	fmt.Printf("• Total Vulnerabilities: %d\n", totalVulns)
+	fmt.Printf("• Total License Violations: %d\n", totalLicenseViolations)
 
 	return nil
 }

@@ -112,14 +112,20 @@ func (re *RuleEngine) EvaluateComponent(component *models.Component) ([]*models.
 				return nil, fmt.Errorf("failed to evaluate rule %s: %w", rule.ID, err)
 			} else if matches {
 				violation := &models.PolicyViolation{
-					RuleID:      rule.ID,
-					RuleName:    rule.Name,
-					Type:        models.ViolationType(rule.Type),
-					Severity:    rule.Severity,
-					Action:      models.PolicyAction(rule.Action),
-					Description: rule.Description,
-					Component:   component.Name + "@" + component.Version,
-					Details:     fmt.Sprintf("Component %s@%s matches rule %s", component.Name, component.Version, rule.Name),
+					ComponentID:       component.ID,
+					ViolationType:     models.ViolationType(rule.Type),
+					Severity:          rule.Severity,
+					PolicyID:          0, // Custom rules don't have policy ID
+					Description:       fmt.Sprintf("Rule '%s': %s", rule.Name, rule.Description),
+					RecommendedAction: fmt.Sprintf("Action required: %s. Component %s@%s matches rule %s", rule.Action, component.Name, component.Version, rule.Name),
+					Status:            models.ViolationStatusOpen,
+					Metadata: map[string]interface{}{
+						"rule_id":           rule.ID,
+						"rule_name":         rule.Name,
+						"rule_action":       rule.Action,
+						"component_name":    component.Name,
+						"component_version": component.Version,
+					},
 				}
 				violations = append(violations, violation)
 			}
@@ -148,14 +154,21 @@ func (re *RuleEngine) EvaluateLicense(license string, component *models.Componen
 				return nil, fmt.Errorf("failed to evaluate license rule %s: %w", rule.ID, err)
 			} else if matches {
 				violation := &models.PolicyViolation{
-					RuleID:      rule.ID,
-					RuleName:    rule.Name,
-					Type:        models.ViolationType(rule.Type),
-					Severity:    rule.Severity,
-					Action:      models.PolicyAction(rule.Action),
-					Description: rule.Description,
-					Component:   component.Name + "@" + component.Version,
-					Details:     fmt.Sprintf("License %s violates rule %s", license, rule.Name),
+					ComponentID:       component.ID,
+					ViolationType:     models.ViolationType(rule.Type),
+					Severity:          rule.Severity,
+					PolicyID:          0, // Custom rules don't have policy ID
+					Description:       fmt.Sprintf("License Rule '%s': %s", rule.Name, rule.Description),
+					RecommendedAction: fmt.Sprintf("Action required: %s. License %s violates rule %s", rule.Action, license, rule.Name),
+					Status:            models.ViolationStatusOpen,
+					Metadata: map[string]interface{}{
+						"rule_id":           rule.ID,
+						"rule_name":         rule.Name,
+						"rule_action":       rule.Action,
+						"license":           license,
+						"component_name":    component.Name,
+						"component_version": component.Version,
+					},
 				}
 				violations = append(violations, violation)
 			}
@@ -178,15 +191,24 @@ func (re *RuleEngine) EvaluateVulnerability(vuln *models.Vulnerability, componen
 			if matches, err := re.evaluateRuleConditions(rule.Conditions, component, vuln, nil); err != nil {
 				return nil, fmt.Errorf("failed to evaluate vulnerability rule %s: %w", rule.ID, err)
 			} else if matches {
+				vulnIDPtr := &vuln.ID
 				violation := &models.PolicyViolation{
-					RuleID:      rule.ID,
-					RuleName:    rule.Name,
-					Type:        models.ViolationType(rule.Type),
-					Severity:    rule.Severity,
-					Action:      models.PolicyAction(rule.Action),
-					Description: rule.Description,
-					Component:   component.Name + "@" + component.Version,
-					Details:     fmt.Sprintf("Vulnerability %s violates rule %s", vuln.ID, rule.Name),
+					ComponentID:       component.ID,
+					VulnerabilityID:   vulnIDPtr,
+					ViolationType:     models.ViolationType(rule.Type),
+					Severity:          rule.Severity,
+					PolicyID:          0, // Custom rules don't have policy ID
+					Description:       fmt.Sprintf("Vulnerability Rule '%s': %s", rule.Name, rule.Description),
+					RecommendedAction: fmt.Sprintf("Action required: %s. Vulnerability %s violates rule %s", rule.Action, vuln.VulnID, rule.Name),
+					Status:            models.ViolationStatusOpen,
+					Metadata: map[string]interface{}{
+						"rule_id":           rule.ID,
+						"rule_name":         rule.Name,
+						"rule_action":       rule.Action,
+						"vulnerability_id":  vuln.VulnID,
+						"component_name":    component.Name,
+						"component_version": component.Version,
+					},
 				}
 				violations = append(violations, violation)
 			}
@@ -296,15 +318,19 @@ func (re *RuleEngine) getFieldValue(field string, component *models.Component, v
 	if vuln != nil {
 		switch field {
 		case "vulnerability_id", "vuln_id", "cve":
-			return vuln.ID, nil
+			return vuln.VulnID, nil
 		case "severity":
 			return vuln.Severity, nil
 		case "cvss_score":
-			return vuln.CVSSScore, nil
+			return vuln.CVSS3Score, nil
 		case "description":
 			return vuln.Description, nil
 		case "fixed_version":
-			return vuln.FixedVersion, nil
+			// Extract fixed version from Fixes array if available
+			if len(vuln.Fixes) > 0 {
+				return vuln.Fixes[0].Version, nil
+			}
+			return "", nil
 		}
 	}
 
