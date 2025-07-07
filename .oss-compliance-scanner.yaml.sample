@@ -1,0 +1,149 @@
+# OSS Compliance Scanner Configuration Sample
+# Copy this file to .oss-compliance-scanner.yaml and modify as needed
+# Environment variables can override these settings with OSS_SCANNER_ prefix
+
+database:
+  # Database driver: sqlite3, postgres, mysql
+  driver: sqlite3
+  # For SQLite
+  path: ./db/oss_scan.db
+  # For PostgreSQL/MySQL (uncomment and configure as needed)
+  # host: localhost
+  # port: 5432
+  # username: oss_scanner
+  # password: your_password
+  # name: oss_compliance
+  # ssl_mode: disable
+
+scanner:
+  # Tool paths (will use PATH if not specified)
+  syft_path: syft
+  grype_path: grype
+  # Scan timeout in seconds
+  timeout_seconds: 300
+  # Maximum parallel scans
+  max_parallel_scans: 3
+  # Temporary directory for scan files
+  temp_dir: /tmp/oss-scanner
+  # Cache directory for tool databases
+  cache_dir: ~/.cache/oss-scanner
+
+policy:
+  # License policies
+  license_policies:
+    - license_name: "GPL-2.0"
+      action: block
+      reason: "Copyleft license incompatible with proprietary software"
+      is_active: true
+    - license_name: "GPL-3.0"
+      action: block
+      reason: "Copyleft license incompatible with proprietary software"
+      is_active: true
+    - license_name: "AGPL-3.0"
+      action: block
+      reason: "Strong copyleft license incompatible with proprietary software"
+      is_active: true
+    - license_name: "LGPL-2.1"
+      action: warn
+      reason: "Weak copyleft license requiring attribution"
+      is_active: true
+    - license_name: "MIT"
+      action: allow
+      reason: "Permissive license compatible with proprietary software"
+      is_active: true
+    - license_name: "Apache-2.0"
+      action: allow
+      reason: "Permissive license compatible with proprietary software"
+      is_active: true
+    - license_name: "BSD-3-Clause"
+      action: allow
+      reason: "Permissive license compatible with proprietary software"
+      is_active: true
+
+  # Vulnerability policies
+  vulnerability_policies:
+    - min_severity_level: "Critical"
+      max_cvss_score: 10.0
+      action: fail
+      ignore_fix_available: false
+      grace_period_days: 0
+      is_active: true
+    - min_severity_level: "High"
+      max_cvss_score: 8.9
+      action: warn
+      ignore_fix_available: false
+      grace_period_days: 30
+      is_active: true
+    - min_severity_level: "Medium"
+      max_cvss_score: 6.9
+      action: warn
+      ignore_fix_available: true
+      grace_period_days: 90
+      is_active: true
+
+  # Global policy settings
+  global_settings:
+    enable_license_check: true
+    enable_vulnerability_check: true
+    # Packages to ignore during scans
+    ignored_packages:
+      - "test-package"
+      - "@types/*"
+    # Trusted package registries
+    trusted_registries:
+      - "registry.npmjs.org"
+      - "registry-1.docker.io"
+    # Scan timeout in minutes
+    scan_timeout_minutes: 30
+    max_parallel_scans: 3
+
+notification:
+  # Slack webhook URL for notifications
+  slack_webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+  # Default Slack channel (can be overridden per notification)
+  slack_channel: "#security-alerts"
+  # When to send notifications
+  notify_on_violation: true
+  notify_on_resolution: false
+  # Minimum severity to trigger notifications
+  min_severity_level: "High"
+  # Batch notifications to reduce spam
+  notification_batching: true
+  # Batching interval in minutes
+  batching_interval_minutes: 60
+
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+  # Log format: text, json
+  format: text
+  # Output: stdout, stderr, file
+  output: stdout
+  # Log file path (when output is file)
+  file: ./logs/oss-scanner.log
+  # Log rotation settings
+  max_size: 100    # MB
+  max_backups: 3   # Number of old log files to keep
+  max_age: 30      # Days to keep old log files
+
+# Web dashboard settings (when running server mode)
+web:
+  host: "0.0.0.0"
+  port: 8080
+  # Static files directory
+  static_dir: "./web/static"
+  # Template directory
+  template_dir: "./web/templates"
+  # Enable CORS for API endpoints
+  enable_cors: true
+  # CORS allowed origins
+  cors_origins:
+    - "http://localhost:3000"
+    - "https://yourdomain.com"
+
+# Multi-tenant settings
+multi_tenant:
+  enabled: false
+  default_tenant: "default"
+  # Tenant isolation mode: strict, relaxed
+  isolation_mode: "strict" 

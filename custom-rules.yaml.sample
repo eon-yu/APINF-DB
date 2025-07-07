@@ -1,0 +1,247 @@
+# Custom Rules Configuration Sample
+# Copy this file to custom-rules.yaml and modify as needed
+# This file defines custom compliance rules beyond the basic policy settings
+
+version: "1.0"
+name: "OSS Compliance Custom Rules"
+description: "Custom rules for OSS license and vulnerability compliance"
+
+# Global settings that apply to all rules
+globals:
+  max_cvss_score: 7.0
+  blocked_licenses:
+    - "GPL-2.0"
+    - "GPL-3.0" 
+    - "AGPL-3.0"
+  warning_licenses:
+    - "LGPL-2.1"
+    - "LGPL-3.0"
+  allowed_licenses:
+    - "MIT"
+    - "Apache-2.0"
+    - "BSD-3-Clause"
+    - "ISC"
+
+# Custom rules definitions
+rules:
+  # License Rules
+  - id: "GPL_BLOCK"
+    name: "Block GPL Licenses"
+    description: "Block any component with GPL family licenses"
+    type: "license"
+    enabled: true
+    severity: "critical"
+    action: "block"
+    conditions:
+      - field: "license"
+        operator: "in"
+        value: "GPL-2.0,GPL-3.0,AGPL-3.0"
+
+  - id: "LGPL_WARNING"
+    name: "Warn on LGPL Licenses"
+    description: "Generate warning for LGPL licenses requiring attribution"
+    type: "license"
+    enabled: true
+    severity: "medium"
+    action: "warn"
+    conditions:
+      - field: "license"
+        operator: "in"
+        value: "LGPL-2.1,LGPL-3.0"
+
+  - id: "UNKNOWN_LICENSE"
+    name: "Unknown License Check"
+    description: "Block components with unknown or missing licenses"
+    type: "license"
+    enabled: true
+    severity: "high"
+    action: "block"
+    conditions:
+      - field: "license"
+        operator: "in"
+        value: "UNKNOWN,NOASSERTION,"
+
+  # Vulnerability Rules
+  - id: "CRITICAL_CVE"
+    name: "Critical Vulnerabilities"
+    description: "Block any component with critical vulnerabilities"
+    type: "vulnerability"
+    enabled: true
+    severity: "critical"
+    action: "block"
+    conditions:
+      - field: "severity"
+        operator: "equals"
+        value: "Critical"
+
+  - id: "HIGH_CVSS"
+    name: "High CVSS Score"
+    description: "Block vulnerabilities with CVSS score >= 8.0"
+    type: "vulnerability"
+    enabled: true
+    severity: "high"
+    action: "block"
+    conditions:
+      - field: "cvss_score"
+        operator: "greater_equal"
+        value: "8.0"
+
+  - id: "MEDIUM_CVE_WARNING"
+    name: "Medium Severity Warning"
+    description: "Warn on medium severity vulnerabilities"
+    type: "vulnerability"
+    enabled: true
+    severity: "medium"
+    action: "warn"
+    conditions:
+      - field: "severity"
+        operator: "equals"
+        value: "Medium"
+
+  - id: "UNFIXED_VULN"
+    name: "Unfixed Vulnerabilities"
+    description: "Warn about vulnerabilities with no available fix"
+    type: "vulnerability"
+    enabled: true
+    severity: "medium"
+    action: "warn"
+    conditions:
+      - field: "fixed_version"
+        operator: "equals"
+        value: ""
+
+  # Component Rules
+  - id: "DEPRECATED_COMPONENT"
+    name: "Deprecated Components"
+    description: "Block known deprecated components"
+    type: "component"
+    enabled: true
+    severity: "high"
+    action: "block"
+    conditions:
+      - field: "name"
+        operator: "in"
+        value: "bower,grunt,deprecated-package"
+
+  - id: "TEST_DEPENDENCY"
+    name: "Test Dependencies in Production"
+    description: "Warn about test-only dependencies"
+    type: "component"
+    enabled: true
+    severity: "low"
+    action: "warn"
+    conditions:
+      - field: "name"
+        operator: "contains"
+        value: "test"
+
+  - id: "OLD_NODEJS_VERSION"
+    name: "Old Node.js Version"
+    description: "Block very old Node.js versions"
+    type: "component"
+    enabled: true
+    severity: "high"
+    action: "block"
+    conditions:
+      - field: "name"
+        operator: "equals"
+        value: "node"
+      - field: "version"
+        operator: "matches"
+        value: "^(0|[1-9]|1[0-6])\\."
+
+  - id: "PYTHON2_EOL"
+    name: "Python 2 End of Life"
+    description: "Block Python 2.x which reached end of life"
+    type: "component"
+    enabled: true
+    severity: "critical"
+    action: "block"
+    conditions:
+      - field: "name"
+        operator: "equals"
+        value: "python"
+      - field: "version"
+        operator: "starts_with"
+        value: "2."
+
+  - id: "SNAPSHOT_VERSIONS"
+    name: "Snapshot Versions"
+    description: "Warn about snapshot/pre-release versions in production"
+    type: "component"
+    enabled: true
+    severity: "medium"
+    action: "warn"
+    conditions:
+      - field: "version"
+        operator: "contains"
+        value: "SNAPSHOT"
+
+  # Advanced Rules with Multiple Conditions
+  - id: "VULNERABLE_CRYPTO"
+    name: "Vulnerable Cryptographic Libraries"
+    description: "Block cryptographic libraries with known vulnerabilities"
+    type: "vulnerability"
+    enabled: true
+    severity: "critical"
+    action: "block"
+    conditions:
+      - field: "component_name"
+        operator: "contains"
+        value: "crypto"
+      - field: "severity"
+        operator: "in"
+        value: "Critical,High"
+
+  - id: "OUTDATED_DEPENDENCIES"
+    name: "Outdated Dependencies"
+    description: "Warn about dependencies that are more than 2 years old"
+    type: "component"
+    enabled: false  # Requires additional metadata
+    severity: "medium"
+    action: "warn"
+    conditions:
+      - field: "release_date"
+        operator: "older_than"
+        value: "730"  # days
+    metadata:
+      recommendation: "Consider updating to a more recent version"
+
+# Rule execution settings
+execution:
+  # Stop on first critical rule violation
+  fail_fast: true
+  # Maximum number of violations to report per rule
+  max_violations_per_rule: 100
+  # Rule execution timeout in seconds
+  timeout_seconds: 60
+
+# Custom rule actions
+actions:
+  # Email notification for critical violations
+  email_notification:
+    enabled: false
+    smtp_server: "smtp.example.com"
+    port: 587
+    username: "alerts@company.com"
+    recipients:
+      - "security-team@company.com"
+      - "dev-team@company.com"
+
+  # JIRA ticket creation
+  jira_integration:
+    enabled: false
+    server_url: "https://company.atlassian.net"
+    project_key: "SEC"
+    issue_type: "Bug"
+    username: "jira-user"
+    api_token: "your-api-token"
+
+  # Custom webhook
+  webhook:
+    enabled: false
+    url: "https://api.company.com/security-alerts"
+    method: "POST"
+    headers:
+      Authorization: "Bearer your-token"
+      Content-Type: "application/json" 

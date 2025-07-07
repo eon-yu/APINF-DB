@@ -1,0 +1,361 @@
+stages:
+  - build
+  - scan
+  - analyze
+  - report
+  - deploy-dashboard
+
+variables:
+  OSS_SCANNER_DATABASE_PATH: "./db/oss_scan.db"
+  OSS_SCANNER_SCANNER_TIMEOUT_SECONDS: "300"
+  OSS_SCANNER_POLICY_GLOBAL_SETTINGS_ENABLE_LICENSE_CHECK: "true"
+  OSS_SCANNER_POLICY_GLOBAL_SETTINGS_ENABLE_VULNERABILITY_CHECK: "true"
+  SYFT_VERSION: "latest"
+  GRYPE_VERSION: "latest"
+
+# 캐시 설정
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - ~/.cache/go-build/
+    - ~/.cache/oss-scanner/
+    - vendor/
+
+# 공통 스크립트
+.install_tools: &install_tools
+  - echo "📦 Installing OSS scanning tools..."
+  - curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+  - curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+  - syft version
+  - grype version
+
+.setup_scanner: &setup_scanner
+  - echo "🔧 Setting up OSS Compliance Scanner..."
+  - go mod download
+  - go build -o oss-compliance-scanner .
+  - mkdir -p db artifacts/sboms artifacts/reports artifacts/exports
+
+# 빌드 단계
+build:
+  stage: build
+  image: golang:1.22-alpine
+  before_script:
+    - apk add --no-cache git curl bash sqlite
+    - *install_tools
+  script:
+    - *setup_scanner
+  artifacts:
+    paths:
+      - oss-compliance-scanner
+      - db/
+    expire_in: 1 hour
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# 스캔 단계 - 모노레포 전체
+scan_full_repository:
+  stage: scan
+  image: golang:1.22-alpine
+  dependencies:
+    - build
+  before_script:
+    - apk add --no-cache git curl bash sqlite jq
+  script:
+    - echo "🔍 Running full repository OSS compliance scan..."
+    
+    # 설정 파일 생성
+    - |
+      cat > .oss-compliance-scanner.yaml << 'EOF'
+      database:
+        driver: sqlite3
+        path: ./db/oss_scan.db
+      
+      scanner:
+        syft_path: /usr/local/bin/syft
+        grype_path: /usr/local/bin/grype
+        timeout_seconds: 300
+        temp_dir: /tmp/oss-scanner
+      
+      policy:
+        global_settings:
+          enable_license_check: true
+          enable_vulnerability_check: true
+          scan_timeout: 30
+      
+      notification:
+        slack:
+          webhook_url: $SLACK_WEBHOOK_URL
+        notify_on_violation: true
+        min_severity_level: High
+      
+      logging:
+        level: info
+        format: json
+      EOF
+    
+    # 커스텀 룰 로드
+    - |
+      if [ -f "custom-rules.yaml" ]; then
+        echo "Using project-specific custom rules"
+        cp custom-rules.yaml ./examples/
+      else
+        echo "Using default custom rules"
+      fi
+    
+    # 전체 저장소 스캔
+    - ./oss-compliance-scanner scan --repo . --notify=true --verbose || echo "Scan completed with issues"
+    
+    # SBOM 생성
+    - echo "📋 Generating SBOM artifacts..."
+    - syft . -o json > artifacts/sboms/sbom.json
+    - syft . -o spdx-json > artifacts/sboms/sbom-spdx.json
+    - syft . -o cyclonedx-json > artifacts/sboms/sbom-cyclonedx.json
+    
+    # 취약점 리포트 생성  
+    - echo "🐛 Generating vulnerability report..."
+    - grype . -o json > artifacts/reports/vulnerabilities.json
+    - grype . -o table > artifacts/reports/vulnerabilities.txt
+    
+  artifacts:
+    paths:
+      - artifacts/
+      - db/oss_scan.db
+    reports:
+      junit: artifacts/reports/junit.xml
+    expire_in: 1 week
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# 스캔 단계 - 개별 모듈
+scan_modules:
+  stage: scan
+  image: golang:1.22-alpine
+  dependencies:
+    - build
+  before_script:
+    - apk add --no-cache git curl bash sqlite jq
+  script:
+    - echo "🔍 Running module-specific OSS compliance scans..."
+    
+    # 자동 모듈 탐지 및 스캔
+    - |
+      MODULES=$(find . -name "package.json" -o -name "go.mod" -o -name "requirements.txt" -o -name "pom.xml" -o -name "Cargo.toml" | sed 's|/[^/]*$||' | sort -u | grep -v '^\.$' || echo "")
+      
+      if [ -n "$MODULES" ]; then
+        echo "Detected modules:"
+        echo "$MODULES"
+        
+        for module in $MODULES; do
+          echo "Scanning module: $module"
+          ./oss-compliance-scanner scan --module "$module" --notify=false --verbose || echo "Module $module scan completed with issues"
+        done
+      else
+        echo "No modules detected, running root scan"
+        ./oss-compliance-scanner scan --repo . --notify=false --verbose || echo "Root scan completed with issues"
+      fi
+    
+  artifacts:
+    paths:
+      - db/oss_scan.db
+    expire_in: 1 week
+  only:
+    - main
+    - develop
+    - merge_requests
+  when: manual  # 수동 실행
+
+# 분석 단계
+analyze_results:
+  stage: analyze
+  image: golang:1.22-alpine
+  dependencies:
+    - scan_full_repository
+  before_script:
+    - apk add --no-cache sqlite jq
+  script:
+    - echo "📊 Analyzing OSS compliance results..."
+    
+    # 데이터베이스에서 결과 추출
+    - |
+      if [ -f "db/oss_scan.db" ]; then
+        echo "Exporting scan results..."
+        sqlite3 db/oss_scan.db ".headers on" ".mode csv" "SELECT * FROM scan_results ORDER BY scan_start_time DESC LIMIT 10;" > artifacts/exports/recent_scans.csv
+        sqlite3 db/oss_scan.db ".headers on" ".mode csv" "SELECT severity, COUNT(*) as count FROM vulnerabilities GROUP BY severity;" > artifacts/exports/vulnerability_summary.csv
+        sqlite3 db/oss_scan.db ".headers on" ".mode csv" "SELECT license_name, COUNT(*) as count FROM components WHERE licenses_json != '' GROUP BY license_name;" > artifacts/exports/license_summary.csv
+        
+        # 요약 통계 생성
+        TOTAL_COMPONENTS=$(sqlite3 db/oss_scan.db "SELECT COUNT(*) FROM components;")
+        TOTAL_VULNS=$(sqlite3 db/oss_scan.db "SELECT COUNT(*) FROM vulnerabilities;")
+        CRITICAL_VULNS=$(sqlite3 db/oss_scan.db "SELECT COUNT(*) FROM vulnerabilities WHERE severity = 'Critical';")
+        HIGH_VULNS=$(sqlite3 db/oss_scan.db "SELECT COUNT(*) FROM vulnerabilities WHERE severity = 'High';")
+        
+        echo "Total Components: $TOTAL_COMPONENTS"
+        echo "Total Vulnerabilities: $TOTAL_VULNS"
+        echo "Critical Vulnerabilities: $CRITICAL_VULNS"
+        echo "High Vulnerabilities: $HIGH_VULNS"
+        
+        # 결과를 환경 변수로 저장
+        echo "TOTAL_COMPONENTS=$TOTAL_COMPONENTS" >> analyze.env
+        echo "TOTAL_VULNS=$TOTAL_VULNS" >> analyze.env
+        echo "CRITICAL_VULNS=$CRITICAL_VULNS" >> analyze.env
+        echo "HIGH_VULNS=$HIGH_VULNS" >> analyze.env
+      fi
+    
+    # Critical 취약점이 있으면 실패
+    - |
+      if [ -f "db/oss_scan.db" ]; then
+        CRITICAL_COUNT=$(sqlite3 db/oss_scan.db "SELECT COUNT(*) FROM vulnerabilities WHERE severity = 'Critical';")
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+          echo "❌ Critical vulnerabilities detected: $CRITICAL_COUNT"
+          echo "Deployment will be blocked!"
+          exit 1
+        fi
+      fi
+    
+  artifacts:
+    paths:
+      - artifacts/exports/
+    reports:
+      dotenv: analyze.env
+    expire_in: 1 week
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# 리포트 단계
+generate_reports:
+  stage: report
+  image: alpine:latest
+  dependencies:
+    - analyze_results
+  before_script:
+    - apk add --no-cache jq curl
+  script:
+    - echo "📝 Generating compliance reports..."
+    
+    # HTML 리포트 생성
+    - |
+      cat > artifacts/reports/compliance_report.html << 'EOF'
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>OSS Compliance Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .summary { background: #f0f8ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+          .critical { color: #d32f2f; font-weight: bold; }
+          .high { color: #f57c00; font-weight: bold; }
+          .medium { color: #fbc02d; font-weight: bold; }
+          .low { color: #388e3c; font-weight: bold; }
+          table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+        </style>
+      </head>
+      <body>
+        <h1>🔍 OSS Compliance Report</h1>
+        <div class="summary">
+          <h2>📊 Summary</h2>
+                     <p>Total Components: <strong>${TOTAL_COMPONENTS:-0}</strong></p>
+           <p>Total Vulnerabilities: <strong>${TOTAL_VULNS:-0}</strong></p>
+           <p class="critical">Critical: ${CRITICAL_VULNS:-0}</p>
+           <p class="high">High: ${HIGH_VULNS:-0}</p>
+        </div>
+        
+        <h2>📋 Generated Files</h2>
+        <ul>
+          <li>SBOM (JSON, SPDX, CycloneDX)</li>
+          <li>Vulnerability Reports</li>
+          <li>License Summary</li>
+          <li>Compliance Database</li>
+        </ul>
+        
+        <p><em>Report generated on $(date)</em></p>
+      </body>
+      </html>
+      EOF
+    
+    # Slack 알림 (선택적)
+    - |
+      if [ -n "$SLACK_WEBHOOK_URL" ] && [ "$CI_COMMIT_REF_NAME" = "main" ]; then
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{
+            \"text\": \"🔍 OSS Compliance Scan Complete\",
+            \"attachments\": [
+              {
+                \"color\": \"good\",
+                \"fields\": [
+                  {\"title\": \"Repository\", \"value\": \"$CI_PROJECT_NAME\", \"short\": true},
+                  {\"title\": \"Branch\", \"value\": \"$CI_COMMIT_REF_NAME\", \"short\": true},
+                  {\"title\": \"Components\", \"value\": \"$TOTAL_COMPONENTS\", \"short\": true},
+                  {\"title\": \"Vulnerabilities\", \"value\": \"$TOTAL_VULNS\", \"short\": true}
+                ]
+              }
+            ]
+          }" \
+          $SLACK_WEBHOOK_URL
+      fi
+    
+  artifacts:
+    paths:
+      - artifacts/reports/compliance_report.html
+    expire_in: 1 month
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# 대시보드 배포 (메인 브랜치만)
+deploy_dashboard:
+  stage: deploy-dashboard
+  image: golang:1.22-alpine
+  dependencies:
+    - build
+    - analyze_results
+  before_script:
+    - apk add --no-cache git curl bash sqlite
+  script:
+    - echo "🌐 Deploying OSS Compliance Dashboard..."
+    
+    # 대시보드 서버 시작 (백그라운드)
+    - nohup ./oss-compliance-scanner server --port 8080 > dashboard.log 2>&1 &
+    - sleep 5
+    
+    # 헬스체크
+    - curl -f http://localhost:8080/api/v1/health || exit 1
+    
+    - echo "✅ Dashboard deployed successfully"
+    - echo "Dashboard URL: http://localhost:8080"
+    - echo "API URL: http://localhost:8080/api/v1"
+    
+  artifacts:
+    paths:
+      - dashboard.log
+    expire_in: 1 day
+  only:
+    - main
+  when: manual  # 수동 배포
+
+# 스케줄링된 스캔 (야간 스캔)
+nightly_scan:
+  extends: scan_full_repository
+  only:
+    - schedules
+  script:
+    - echo "🌙 Running nightly OSS compliance scan..."
+    - ./oss-compliance-scanner scan --repo . --notify=true --verbose
+    
+    # 야간 스캔 결과를 특별히 처리
+    - |
+      if [ -f "db/oss_scan.db" ]; then
+        CRITICAL_COUNT=$(sqlite3 db/oss_scan.db "SELECT COUNT(*) FROM vulnerabilities WHERE severity = 'Critical';")
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+          echo "🚨 CRITICAL: $CRITICAL_COUNT critical vulnerabilities found in nightly scan!"
+          # 긴급 알림 로직
+        fi
+      fi 

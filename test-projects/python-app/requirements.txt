@@ -1,0 +1,36 @@
+# Web framework dependencies
+Flask==2.0.1
+Django==3.2.5
+requests==2.25.1
+urllib3==1.26.5
+
+# Data processing
+pandas==1.3.0
+numpy==1.21.0
+Pillow==8.2.0
+
+# Database
+SQLAlchemy==1.4.20
+psycopg2-binary==2.9.1
+pymongo==3.12.0
+
+# Security and authentication
+cryptography==3.4.7
+PyJWT==2.1.0
+bcrypt==3.2.0
+
+# Development and testing
+pytest==6.2.4
+coverage==5.5
+black==21.6b0
+
+# Utilities with known vulnerabilities (for testing)
+jinja2==2.11.3
+pyyaml==5.4.1
+lxml==4.6.3
+setuptools==57.0.0
+
+# Old versions for testing compliance
+django-debug-toolbar==2.2
+paramiko==2.7.2
+werkzeug==1.0.1 

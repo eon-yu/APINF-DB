@@ -1,0 +1,147 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+oss-compliance-scanner
+oss-compliance-scanner.exe
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# Database files
+db/oss_scan.db
+db/*.db
+*.db
+
+# Configuration files (keep samples, ignore actual config)
+.oss-compliance-scanner.yaml
+custom-rules.yaml
+!*.yaml.sample
+
+# Logs
+*.log
+logs/
+test-projects/test-results/
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Java
+*.class
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+target/
+.mvn/
+mvnw
+mvnw.cmd
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Docker
+docker-compose.yaml
+Dockerfile
+!*.sample
+
+# Kubernetes
+k8s.yaml
+!k8s.yaml.sample
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+
+# Backup files
+*.bak
+*.backup
+
+# Coverage reports
+coverage.txt
+coverage.out
+*.cover
+
+# Test artifacts
+test-output/
+test-reports/
+.pytest_cache/
+.coverage
+
+# Lock files (include package-lock.json for reproducible builds in test projects)
+yarn.lock
+poetry.lock
+
+# Slack webhook URLs and sensitive data
+.env.local
+.env.production
+secrets.yaml 

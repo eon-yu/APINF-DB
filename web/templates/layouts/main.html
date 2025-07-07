@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - OSS Compliance Scanner</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #2c3e50, #34495e);
+        }
+        .sidebar .nav-link {
+            color: #ecf0f1;
+            border-radius: 8px;
+            margin: 2px 0;
+            transition: all 0.3s ease;
+        }
+        .sidebar .nav-link:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+        .sidebar .nav-link.active {
+            background-color: #3498db;
+            color: #ffffff;
+        }
+        .main-content {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 12px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .stat-card.danger {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .stat-card.warning {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+        .stat-card.success {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+        .table th {
+            background-color: #f8f9fa;
+            border: none;
+            font-weight: 600;
+        }
+        .badge-severity {
+            font-size: 0.75rem;
+            padding: 0.35rem 0.65rem;
+        }
+        .severity-critical { background-color: #dc3545; }
+        .severity-high { background-color: #fd7e14; }
+        .severity-medium { background-color: #ffc107; color: #000; }
+        .severity-low { background-color: #28a745; }
+        .severity-unknown { background-color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar collapse">
+                <div class="position-sticky pt-3">
+                    <div class="text-center mb-4">
+                        <h4 class="text-white">
+                            <i class="bi bi-shield-check"></i>
+                            OSS Scanner
+                        </h4>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="/">
+                                <i class="bi bi-speedometer2"></i>
+                                대시보드
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/sboms">
+                                <i class="bi bi-file-earmark-text"></i>
+                                SBOM 목록
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/vulnerabilities">
+                                <i class="bi bi-bug"></i>
+                                취약점
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/policies">
+                                <i class="bi bi-gear"></i>
+                                정책 관리
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/violations">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                정책 위반
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/reports">
+                                <i class="bi bi-graph-up"></i>
+                                스캔 보고서
+                            </a>
+                        </li>
+                    </ul>
+                    
+                    <hr class="text-white">
+                    
+                    <div class="dropdown">
+                        <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle" 
+                           id="dropdownUser1" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-person-circle me-2"></i>
+                            <strong>Admin</strong>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-dark text-small shadow">
+                            <li><a class="dropdown-item" href="/api/v1/health">API Health</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#">설정</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- Main content -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
+                <div class="pt-3 pb-2 mb-3">
+                    <h1 class="h2">{{.Title}}</h1>
+                </div>
+                
+                {{embed}}
+            </main>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // 현재 페이지에 따라 사이드바 활성화
+        document.addEventListener('DOMContentLoaded', function() {
+            const currentPath = window.location.pathname;
+            const navLinks = document.querySelectorAll('.sidebar .nav-link');
+            
+            navLinks.forEach(link => {
+                if (link.getAttribute('href') === currentPath) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

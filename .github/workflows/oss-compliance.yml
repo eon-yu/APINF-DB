@@ -1,0 +1,255 @@
+name: OSS Compliance Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # 매일 오전 2시 (UTC)에 실행
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      modules:
+        description: '스캔할 모듈 (쉼표로 구분, 빈 값이면 전체)'
+        required: false
+        default: ''
+      notify_slack:
+        description: 'Slack 알림 전송'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+
+env:
+  OSS_SCANNER_DATABASE_PATH: ./db/oss_scan.db
+  OSS_SCANNER_SCANNER_TIMEOUT_SECONDS: 300
+  OSS_SCANNER_POLICY_GLOBAL_SETTINGS_ENABLE_LICENSE_CHECK: true
+  OSS_SCANNER_POLICY_GLOBAL_SETTINGS_ENABLE_VULNERABILITY_CHECK: true
+
+jobs:
+  oss-compliance-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 전체 히스토리 가져오기 (필요한 경우)
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22'
+
+    - name: Install Syft
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+        syft version
+
+    - name: Install Grype
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+        grype version
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+          ~/.cache/oss-scanner
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-oss-${{ hashFiles('**/package*.json', '**/requirements.txt', '**/Gemfile', '**/composer.json') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Build OSS Compliance Scanner
+      run: |
+        go mod download
+        go build -o oss-compliance-scanner .
+
+    - name: Create configuration
+      run: |
+        mkdir -p db
+        cat > .oss-compliance-scanner.yaml << 'EOF'
+        database:
+          driver: sqlite3
+          path: ./db/oss_scan.db
+        
+        scanner:
+          syft_path: /usr/local/bin/syft
+          grype_path: /usr/local/bin/grype
+          timeout_seconds: 300
+          temp_dir: /tmp/oss-scanner
+        
+        policy:
+          global_settings:
+            enable_license_check: true
+            enable_vulnerability_check: true
+            scan_timeout: 30
+        
+        notification:
+          slack:
+            webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          notify_on_violation: true
+          min_severity_level: High
+        
+        logging:
+          level: info
+          format: json
+        EOF
+
+    - name: Load custom rules
+      run: |
+        if [ -f "custom-rules.yaml" ]; then
+          echo "Using project-specific custom rules"
+          cp custom-rules.yaml ./examples/
+        else
+          echo "Using default custom rules"
+        fi
+
+    - name: Run OSS Compliance Scan - Full Repository
+      if: github.event.inputs.modules == ''
+      run: |
+        echo "🔍 Running full repository scan..."
+        ./oss-compliance-scanner scan \
+          --repo . \
+          --notify=${{ github.event.inputs.notify_slack || 'true' }} \
+          --verbose || echo "Scan completed with issues"
+
+    - name: Run OSS Compliance Scan - Specific Modules
+      if: github.event.inputs.modules != ''
+      run: |
+        echo "🔍 Running scan for modules: ${{ github.event.inputs.modules }}"
+        IFS=',' read -ra MODULES <<< "${{ github.event.inputs.modules }}"
+        for module in "${MODULES[@]}"; do
+          echo "Scanning module: $module"
+          ./oss-compliance-scanner scan \
+            --module "$module" \
+            --notify=${{ github.event.inputs.notify_slack || 'true' }} \
+            --verbose || echo "Module $module scan completed with issues"
+        done
+
+    - name: Generate SBOM artifacts
+      run: |
+        echo "📋 Generating SBOM artifacts..."
+        mkdir -p artifacts/sboms
+        
+        # JSON 형식 SBOM 생성
+        if command -v syft >/dev/null 2>&1; then
+          syft . -o json > artifacts/sboms/sbom.json
+          syft . -o spdx-json > artifacts/sboms/sbom-spdx.json
+          syft . -o cyclonedx-json > artifacts/sboms/sbom-cyclonedx.json
+        fi
+
+    - name: Generate vulnerability report
+      run: |
+        echo "🐛 Generating vulnerability report..."
+        mkdir -p artifacts/reports
+        
+        if command -v grype >/dev/null 2>&1; then
+          grype . -o json > artifacts/reports/vulnerabilities.json
+          grype . -o table > artifacts/reports/vulnerabilities.txt
+        fi
+
+    - name: Upload SBOM and reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: oss-compliance-reports-${{ github.run_number }}
+        path: |
+          artifacts/
+          db/oss_scan.db
+        retention-days: 30
+
+    - name: Export scan results
+      run: |
+        echo "📊 Exporting scan results..."
+        mkdir -p artifacts/exports
+        
+        # 데이터베이스에서 결과 조회 (SQLite CLI 사용)
+        if [ -f "db/oss_scan.db" ]; then
+          sqlite3 db/oss_scan.db ".headers on" ".mode csv" "SELECT * FROM scan_results ORDER BY scan_start_time DESC LIMIT 10;" > artifacts/exports/recent_scans.csv
+          sqlite3 db/oss_scan.db ".headers on" ".mode csv" "SELECT severity, COUNT(*) as count FROM vulnerabilities GROUP BY severity;" > artifacts/exports/vulnerability_summary.csv
+        fi
+
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          let comment = '## 🔍 OSS Compliance Scan Results\n\n';
+          
+          // Vulnerability summary가 있으면 포함
+          try {
+            if (fs.existsSync('artifacts/exports/vulnerability_summary.csv')) {
+              const vulnData = fs.readFileSync('artifacts/exports/vulnerability_summary.csv', 'utf8');
+              comment += '### Vulnerability Summary\n```\n' + vulnData + '\n```\n\n';
+            }
+          } catch (error) {
+            console.log('No vulnerability summary found');
+          }
+          
+          comment += '### Artifacts\n';
+          comment += '- 📋 SBOM files generated\n';
+          comment += '- 🐛 Vulnerability reports created\n';
+          comment += '- 📊 Compliance data exported\n\n';
+          comment += `View detailed results in the [workflow run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}).`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+    - name: Create GitHub Security Advisory
+      if: failure() && github.ref == 'refs/heads/main'
+      run: |
+        echo "⚠️ Critical issues detected. Consider creating security advisory."
+        # 여기에 GitHub Security Advisory 생성 로직 추가 가능
+
+    - name: Fail on critical issues
+      run: |
+        echo "🔍 Checking for critical compliance issues..."
+        if [ -f "db/oss_scan.db" ]; then
+          CRITICAL_COUNT=$(sqlite3 db/oss_scan.db "SELECT COUNT(*) FROM vulnerabilities WHERE severity = 'Critical';")
+          echo "Critical vulnerabilities found: $CRITICAL_COUNT"
+          
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "❌ Critical vulnerabilities detected. Workflow will fail."
+            exit 1
+          fi
+        fi
+        echo "✅ No critical issues found."
+
+  security-review:
+    needs: oss-compliance-scan
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && (success() || failure())
+    
+    steps:
+    - name: Download scan results
+      uses: actions/download-artifact@v3
+      with:
+        name: oss-compliance-reports-${{ github.run_number }}
+
+    - name: Security review notification
+      if: failure()
+      run: |
+        echo "🔍 Security review required for main branch"
+        # 여기에 보안팀 알림 로직 추가
+
+  compliance-dashboard-update:
+    needs: oss-compliance-scan
+    runs-on: ubuntu-latest
+    if: success() && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Update compliance dashboard
+      run: |
+        echo "📊 Updating compliance dashboard..."
+        # 여기에 대시보드 업데이트 로직 추가
+        # 예: API 호출로 결과 전송 

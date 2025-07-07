@@ -1,0 +1,64 @@
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h3>
+        <i class="bi bi-file-earmark-text text-primary"></i>
+        SBOM 목록
+    </h3>
+    <button class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i>
+        새 스캔 실행
+    </button>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>저장소</th>
+                        <th>모듈 경로</th>
+                        <th>스캔 날짜</th>
+                        <th>컴포넌트 수</th>
+                        <th>Syft 버전</th>
+                        <th>액션</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .SBOMs}}
+                    <tr>
+                        <td>
+                            <i class="bi bi-git text-muted me-2"></i>
+                            <strong>{{.RepoName}}</strong>
+                        </td>
+                        <td>
+                            <code>{{.ModulePath}}</code>
+                        </td>
+                        <td>
+                            <small class="text-muted">{{.ScanDate}}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-info">{{.TotalComponents}}</span>
+                        </td>
+                        <td>
+                            <small>{{.ScannerVersion}}</small>
+                        </td>
+                        <td>
+                            <a href="/sboms/{{.SBOMID}}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-eye"></i>
+                                상세보기
+                            </a>
+                        </td>
+                    </tr>
+                    {{else}}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            <i class="bi bi-inbox display-4 d-block mb-3"></i>
+                            아직 스캔된 SBOM이 없습니다.
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div> 

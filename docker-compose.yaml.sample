@@ -1,0 +1,230 @@
+# OSS Compliance Scanner를 위한 Docker Compose 설정 샘플
+# 이 파일을 docker-compose.yaml로 복사하고 필요에 따라 수정하세요
+
+version: '3.8'
+
+services:
+  # OSS Compliance Scanner API 서버
+  oss-scanner-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oss-scanner-api
+    ports:
+      - "8080:8080"
+    environment:
+      # 데이터베이스 설정
+      - OSS_SCANNER_DATABASE_DRIVER=postgres
+      - OSS_SCANNER_DATABASE_HOST=postgres
+      - OSS_SCANNER_DATABASE_PORT=5432
+      - OSS_SCANNER_DATABASE_USERNAME=oss_scanner
+      - OSS_SCANNER_DATABASE_PASSWORD=secure_password
+      - OSS_SCANNER_DATABASE_NAME=oss_compliance
+      - OSS_SCANNER_DATABASE_SSL_MODE=disable
+      
+      # 스캐너 도구 설정
+      - OSS_SCANNER_SCANNER_SYFT_PATH=/usr/local/bin/syft
+      - OSS_SCANNER_SCANNER_GRYPE_PATH=/usr/local/bin/grype
+      - OSS_SCANNER_SCANNER_TIMEOUT_SECONDS=300
+      - OSS_SCANNER_SCANNER_MAX_PARALLEL_SCANS=3
+      
+      # 알림 설정
+      - OSS_SCANNER_NOTIFICATION_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+      - OSS_SCANNER_NOTIFICATION_SLACK_CHANNEL=#security-alerts
+      - OSS_SCANNER_NOTIFICATION_NOTIFY_ON_VIOLATION=true
+      - OSS_SCANNER_NOTIFICATION_MIN_SEVERITY_LEVEL=High
+      
+      # 로깅 설정
+      - OSS_SCANNER_LOGGING_LEVEL=info
+      - OSS_SCANNER_LOGGING_FORMAT=json
+      - OSS_SCANNER_LOGGING_OUTPUT=stdout
+    volumes:
+      # 설정 파일들
+      - ./.oss-compliance-scanner.yaml:/app/.oss-compliance-scanner.yaml:ro
+      - ./custom-rules.yaml:/app/custom-rules.yaml:ro
+      # 스캔 캐시 및 임시 파일들
+      - oss-scanner-cache:/app/cache
+      - oss-scanner-temp:/tmp/oss-scanner
+      # 로그
+      - oss-scanner-logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 웹 대시보드 (같은 컨테이너 또는 별도 컨테이너 가능)
+  oss-scanner-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oss-scanner-web
+    ports:
+      - "8081:8080"
+    environment:
+      - OSS_SCANNER_MODE=web
+      - OSS_SCANNER_WEB_HOST=0.0.0.0
+      - OSS_SCANNER_WEB_PORT=8080
+      - OSS_SCANNER_DATABASE_DRIVER=postgres
+      - OSS_SCANNER_DATABASE_HOST=postgres
+      - OSS_SCANNER_DATABASE_PORT=5432
+      - OSS_SCANNER_DATABASE_USERNAME=oss_scanner
+      - OSS_SCANNER_DATABASE_PASSWORD=secure_password
+      - OSS_SCANNER_DATABASE_NAME=oss_compliance
+    volumes:
+      - ./.oss-compliance-scanner.yaml:/app/.oss-compliance-scanner.yaml:ro
+      - ./web/static:/app/web/static:ro
+      - ./web/templates:/app/web/templates:ro
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+
+  # 스케줄 스캐너 (크론 작업 기능)
+  oss-scanner-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oss-scanner-scheduler
+    environment:
+      - OSS_SCANNER_MODE=scheduler
+      - OSS_SCANNER_DATABASE_DRIVER=postgres
+      - OSS_SCANNER_DATABASE_HOST=postgres
+      - OSS_SCANNER_DATABASE_PORT=5432
+      - OSS_SCANNER_DATABASE_USERNAME=oss_scanner
+      - OSS_SCANNER_DATABASE_PASSWORD=secure_password
+      - OSS_SCANNER_DATABASE_NAME=oss_compliance
+      # 스캔 스케줄 (크론 표현식)
+      - SCAN_SCHEDULE=0 2 * * *  # 매일 오전 2시
+    volumes:
+      - ./.oss-compliance-scanner.yaml:/app/.oss-compliance-scanner.yaml:ro
+      - ./custom-rules.yaml:/app/custom-rules.yaml:ro
+      - oss-scanner-cache:/app/cache
+      - oss-scanner-temp:/tmp/oss-scanner
+      - oss-scanner-logs:/app/logs
+      # 스캔할 소스 코드 저장소 마운트
+      - /path/to/your/repos:/repos:ro
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+
+  # PostgreSQL 데이터베이스
+  postgres:
+    image: postgres:15-alpine
+    container_name: oss-scanner-postgres
+    environment:
+      - POSTGRES_DB=oss_compliance
+      - POSTGRES_USER=oss_scanner
+      - POSTGRES_PASSWORD=secure_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oss_scanner -d oss_compliance"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 캐싱 및 작업 큐를 위한 Redis (선택사항)
+  redis:
+    image: redis:7-alpine
+    container_name: oss-scanner-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Nginx 리버스 프록시 (선택사항)
+  nginx:
+    image: nginx:alpine
+    container_name: oss-scanner-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - oss-scanner-api
+      - oss-scanner-web
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+
+  # 모니터링을 위한 Prometheus (선택사항)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: oss-scanner-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+
+  # 대시보드를 위한 Grafana (선택사항)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: oss-scanner-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin_password
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - oss-scanner-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  oss-scanner-cache:
+  oss-scanner-temp:
+  oss-scanner-logs:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  oss-scanner-network:
+    driver: bridge 
