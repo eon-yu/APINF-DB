@@ -212,21 +212,18 @@
                 </div>
             </div>
         </div>
-        {{else}}
-        <!-- 데이터가 없는 경우 -->
-        <div class="col-12">
-            <div class="text-center py-5">
-                <i class="bi bi-inbox display-1 text-muted"></i>
-                <h4 class="mt-3">아직 스캔된 저장소가 없습니다</h4>
-                <p class="text-muted">첫 번째 스캔을 시작하여 저장소를 관리해보세요.</p>
-                <button class="btn btn-primary mt-3" onclick="showNewScanModal()">
-                    <i class="bi bi-plus-circle"></i>
-                    첫 번째 스캔 시작하기
-                </button>
-            </div>
-        </div>
         {{end}}
     </div>
+</div>
+{{else}}
+<div class="alert alert-info text-center py-5">
+    <i class="bi bi-inbox display-4 d-block mb-3"></i>
+    <h5>스캔된 SBOM이 없습니다</h5>
+    <p class="text-muted">새 스캔을 실행하여 SBOM을 생성해보세요.</p>
+    <button class="btn btn-primary" onclick="showNewScanModal()">
+        <i class="bi bi-plus-circle"></i>
+        새 스캔 실행
+    </button>
 </div>
 {{end}}
 

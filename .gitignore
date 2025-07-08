@@ -145,3 +145,6 @@ poetry.lock
 .env.local
 .env.production
 secrets.yaml 
+*.pdf
+*.csv
+api-nf-dependency-bot
