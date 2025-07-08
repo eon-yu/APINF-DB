@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSBOM_Fields(t *testing.T) {
@@ -237,4 +239,306 @@ func TestSyftOutput_Structure(t *testing.T) {
 	if output.Artifacts[0].Name != "express" {
 		t.Errorf("Expected Artifact Name 'express', got %s", output.Artifacts[0].Name)
 	}
+
+	assert.NotNil(t, output.Source)
+}
+
+// Tests for vulnerability.go
+
+func TestVulnerability_MarshalVulnerabilityFields(t *testing.T) {
+	vuln := &Vulnerability{
+		URLs: []string{"https://example.com/cve-1", "https://example.com/cve-2"},
+		Fixes: []VulnerabilityFix{
+			{Version: "1.2.3", State: "fixed"},
+			{Version: "1.2.4", State: "fixed"},
+		},
+		Metadata: map[string]interface{}{
+			"source":     "grype",
+			"confidence": 0.95,
+		},
+	}
+
+	err := vuln.MarshalVulnerabilityFields()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, vuln.URLsJSON)
+	assert.NotEmpty(t, vuln.FixesJSON)
+	assert.NotEmpty(t, vuln.MetadataJSON)
+	assert.Contains(t, vuln.URLsJSON, "https://example.com/cve-1")
+}
+
+func TestVulnerability_UnmarshalVulnerabilityFields(t *testing.T) {
+	vuln := &Vulnerability{
+		URLsJSON:     `["https://example.com/cve-1","https://example.com/cve-2"]`,
+		FixesJSON:    `[{"version":"1.2.3","state":"fixed"}]`,
+		MetadataJSON: `{"source":"grype","confidence":0.95}`,
+	}
+
+	err := vuln.UnmarshalVulnerabilityFields()
+	assert.NoError(t, err)
+	assert.Len(t, vuln.URLs, 2)
+	assert.Equal(t, "https://example.com/cve-1", vuln.URLs[0])
+	assert.Len(t, vuln.Fixes, 1)
+	assert.Equal(t, "1.2.3", vuln.Fixes[0].Version)
+	assert.Equal(t, "fixed", vuln.Fixes[0].State)
+	assert.Equal(t, "grype", vuln.Metadata["source"])
+}
+
+func TestVulnerability_UnmarshalVulnerabilityFields_InvalidJSON(t *testing.T) {
+	vuln := &Vulnerability{
+		URLsJSON: `invalid json`,
+	}
+
+	err := vuln.UnmarshalVulnerabilityFields()
+	assert.Error(t, err)
+}
+
+func TestSeverityLevel_ParseSeverity(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected SeverityLevel
+	}{
+		{"Critical", SeverityCritical},
+		{"High", SeverityHigh},
+		{"Medium", SeverityMedium},
+		{"Low", SeverityLow},
+		{"Negligible", SeverityNegligible},
+		{"Unknown", SeverityUnknown},
+		{"invalid", SeverityUnknown},
+		{"", SeverityUnknown},
+	}
+
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			result := ParseSeverity(test.input)
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestSeverityLevel_String(t *testing.T) {
+	tests := []struct {
+		level    SeverityLevel
+		expected string
+	}{
+		{SeverityCritical, "Critical"},
+		{SeverityHigh, "High"},
+		{SeverityMedium, "Medium"},
+		{SeverityLow, "Low"},
+		{SeverityNegligible, "Negligible"},
+		{SeverityUnknown, "Unknown"},
+		{SeverityLevel(999), "Unknown"}, // Invalid level
+	}
+
+	for _, test := range tests {
+		t.Run(test.expected, func(t *testing.T) {
+			result := test.level.String()
+			assert.Equal(t, test.expected, result)
+		})
+	}
+}
+
+func TestGrypeOutput_Structure(t *testing.T) {
+	output := &GrypeOutput{
+		Matches: []GrypeMatch{
+			{
+				Vulnerability: GrypeVulnerability{
+					ID:         "CVE-2023-1234",
+					Severity:   "High",
+					DataSource: "nvd",
+				},
+				Artifact: GrypeArtifact{
+					Name:    "test-package",
+					Version: "1.0.0",
+				},
+			},
+		},
+		Source: GrypeSource{
+			Type:   "directory",
+			Target: "/path/to/source",
+		},
+		Distro: GrypeDistro{
+			Name:    "ubuntu",
+			Version: "20.04",
+		},
+	}
+
+	assert.Len(t, output.Matches, 1)
+	assert.Equal(t, "CVE-2023-1234", output.Matches[0].Vulnerability.ID)
+	assert.Equal(t, "High", output.Matches[0].Vulnerability.Severity)
+	assert.Equal(t, "test-package", output.Matches[0].Artifact.Name)
+	assert.Equal(t, "directory", output.Source.Type)
+	assert.Equal(t, "ubuntu", output.Distro.Name)
+}
+
+// Tests for policy.go
+
+func TestPolicyViolation_MarshalPolicyViolationFields(t *testing.T) {
+	violation := &PolicyViolation{
+		Metadata: map[string]interface{}{
+			"rule":       "license-check",
+			"confidence": 0.98,
+			"details":    "GPL license not allowed",
+		},
+	}
+
+	err := violation.MarshalPolicyViolationFields()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, violation.MetadataJSON)
+	assert.Contains(t, violation.MetadataJSON, "license-check")
+}
+
+func TestPolicyViolation_UnmarshalPolicyViolationFields(t *testing.T) {
+	violation := &PolicyViolation{
+		MetadataJSON: `{"rule":"license-check","confidence":0.98,"details":"GPL license not allowed"}`,
+	}
+
+	err := violation.UnmarshalPolicyViolationFields()
+	assert.NoError(t, err)
+	assert.Equal(t, "license-check", violation.Metadata["rule"])
+	assert.Equal(t, 0.98, violation.Metadata["confidence"])
+	assert.Equal(t, "GPL license not allowed", violation.Metadata["details"])
+}
+
+func TestPolicyViolation_UnmarshalPolicyViolationFields_InvalidJSON(t *testing.T) {
+	violation := &PolicyViolation{
+		MetadataJSON: `invalid json`,
+	}
+
+	err := violation.UnmarshalPolicyViolationFields()
+	assert.Error(t, err)
+}
+
+func TestScanResult_MarshalScanResultFields(t *testing.T) {
+	result := &ScanResult{
+		Metadata: map[string]interface{}{
+			"scanner_version": "1.0.0",
+			"scan_options":    []string{"--all", "--verbose"},
+			"duration":        "5m30s",
+		},
+	}
+
+	err := result.MarshalScanResultFields()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, result.MetadataJSON)
+	assert.Contains(t, result.MetadataJSON, "scanner_version")
+}
+
+func TestScanResult_UnmarshalScanResultFields(t *testing.T) {
+	result := &ScanResult{
+		MetadataJSON: `{"scanner_version":"1.0.0","duration":"5m30s"}`,
+	}
+
+	err := result.UnmarshalScanResultFields()
+	assert.NoError(t, err)
+	assert.Equal(t, "1.0.0", result.Metadata["scanner_version"])
+	assert.Equal(t, "5m30s", result.Metadata["duration"])
+}
+
+func TestScanResult_CalculateOverallRisk(t *testing.T) {
+	tests := []struct {
+		name          string
+		criticalVulns int
+		highVulns     int
+		mediumVulns   int
+		lowVulns      int
+		expected      RiskLevel
+	}{
+		{"Critical risk", 5, 10, 20, 30, RiskLevelCritical},
+		{"High risk", 0, 8, 15, 25, RiskLevelHigh},
+		{"Medium risk", 0, 0, 12, 20, RiskLevelMedium},
+		{"Low risk", 0, 0, 0, 5, RiskLevelLow},
+		{"No vulnerabilities", 0, 0, 0, 0, RiskLevelLow},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := &ScanResult{
+				CriticalVulns: test.criticalVulns,
+				HighVulns:     test.highVulns,
+				MediumVulns:   test.mediumVulns,
+				LowVulns:      test.lowVulns,
+			}
+
+			risk := result.CalculateOverallRisk()
+			assert.Equal(t, test.expected, risk)
+		})
+	}
+}
+
+func TestPolicyAction_Constants(t *testing.T) {
+	assert.Equal(t, PolicyAction("allow"), PolicyActionAllow)
+	assert.Equal(t, PolicyAction("warn"), PolicyActionWarn)
+	assert.Equal(t, PolicyAction("block"), PolicyActionBlock)
+	assert.Equal(t, PolicyAction("fail"), PolicyActionFail)
+}
+
+func TestViolationType_Constants(t *testing.T) {
+	assert.Equal(t, ViolationType("license"), ViolationTypeLicense)
+	assert.Equal(t, ViolationType("vulnerability"), ViolationTypeVulnerability)
+}
+
+func TestViolationStatus_Constants(t *testing.T) {
+	assert.Equal(t, ViolationStatus("open"), ViolationStatusOpen)
+	assert.Equal(t, ViolationStatus("ignored"), ViolationStatusIgnored)
+	assert.Equal(t, ViolationStatus("resolved"), ViolationStatusResolved)
+	assert.Equal(t, ViolationStatus("false_positive"), ViolationStatusFalsePositive)
+}
+
+func TestScanStatus_Constants(t *testing.T) {
+	assert.Equal(t, ScanStatus("pending"), ScanStatusPending)
+	assert.Equal(t, ScanStatus("running"), ScanStatusRunning)
+	assert.Equal(t, ScanStatus("completed"), ScanStatusCompleted)
+	assert.Equal(t, ScanStatus("failed"), ScanStatusFailed)
+	assert.Equal(t, ScanStatus("cancelled"), ScanStatusCancelled)
+}
+
+func TestRiskLevel_Constants(t *testing.T) {
+	assert.Equal(t, RiskLevel("low"), RiskLevelLow)
+	assert.Equal(t, RiskLevel("medium"), RiskLevelMedium)
+	assert.Equal(t, RiskLevel("high"), RiskLevelHigh)
+	assert.Equal(t, RiskLevel("critical"), RiskLevelCritical)
+}
+
+func TestPolicyConfig_Structure(t *testing.T) {
+	config := &PolicyConfig{
+		LicensePolicies: []LicensePolicy{
+			{LicenseName: "MIT", Action: PolicyActionAllow},
+			{LicenseName: "GPL", Action: PolicyActionBlock},
+		},
+		VulnerabilityPolicies: []VulnerabilityPolicy{
+			{MinSeverityLevel: "High", Action: PolicyActionFail},
+		},
+		GlobalSettings: GlobalPolicySettings{
+			EnableLicenseCheck:       true,
+			EnableVulnerabilityCheck: true,
+			ScanTimeout:              30,
+		},
+	}
+
+	assert.Len(t, config.LicensePolicies, 2)
+	assert.Equal(t, "MIT", config.LicensePolicies[0].LicenseName)
+	assert.Equal(t, PolicyActionAllow, config.LicensePolicies[0].Action)
+	assert.Len(t, config.VulnerabilityPolicies, 1)
+	assert.Equal(t, "High", config.VulnerabilityPolicies[0].MinSeverityLevel)
+	assert.True(t, config.GlobalSettings.EnableLicenseCheck)
+}
+
+func TestNotificationSettings_Structure(t *testing.T) {
+	settings := &NotificationSettings{
+		SlackWebhookURL:      "https://hooks.slack.com/test",
+		SlackChannel:         "#security",
+		NotifyOnViolation:    true,
+		NotifyOnResolution:   false,
+		MinSeverityLevel:     "High",
+		NotificationBatching: true,
+		BatchingInterval:     15,
+	}
+
+	assert.Equal(t, "https://hooks.slack.com/test", settings.SlackWebhookURL)
+	assert.Equal(t, "#security", settings.SlackChannel)
+	assert.True(t, settings.NotifyOnViolation)
+	assert.False(t, settings.NotifyOnResolution)
+	assert.Equal(t, "High", settings.MinSeverityLevel)
+	assert.True(t, settings.NotificationBatching)
+	assert.Equal(t, 15, settings.BatchingInterval)
 }
