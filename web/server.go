@@ -10,6 +10,7 @@ import (
 
 	"oss-compliance-scanner/db"
 	"oss-compliance-scanner/models"
+	"oss-compliance-scanner/notifier"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -23,6 +24,16 @@ type DashboardServer struct {
 	app      *fiber.App
 	database *db.Database
 	port     string
+}
+
+// RepositoryInfo holds information about a repository and its modules
+type RepositoryInfo struct {
+	Name                 string         `json:"name"`
+	Modules              []*models.SBOM `json:"modules"`
+	TotalComponents      int            `json:"total_components"`
+	TotalVulnerabilities int            `json:"total_vulnerabilities"`
+	LastScanDate         string         `json:"last_scan_date"`
+	RiskLevel            string         `json:"risk_level"`
 }
 
 // NewDashboardServer creates a new dashboard server instance
@@ -108,6 +119,9 @@ func (ds *DashboardServer) setupRoutes() {
 	api.Get("/health/db", ds.handleAPIHealthDB)
 	api.Get("/health/scanner", ds.handleAPIHealthScanner)
 	api.Get("/health/notifier", ds.handleAPIHealthNotifier)
+
+	// Notification test API
+	api.Post("/notifications/slack/test", ds.handleAPISlackTest)
 }
 
 // Start starts the web server
@@ -142,14 +156,74 @@ func (ds *DashboardServer) handleDashboard(c *fiber.Ctx) error {
 
 func (ds *DashboardServer) handleSBOMs(c *fiber.Ctx) error {
 	// Get SBOMs directly from the sboms table
-	sboms, err := ds.database.GetAllSBOMs(50)
+	sboms, err := ds.database.GetAllSBOMs(100)
 	if err != nil {
 		return c.Status(500).SendString("Failed to load SBOMs")
 	}
 
+	// Group SBOMs by repository
+	repositoryGroups := make(map[string]*RepositoryInfo)
+
+	for _, sbom := range sboms {
+		if _, exists := repositoryGroups[sbom.RepoName]; !exists {
+			repositoryGroups[sbom.RepoName] = &RepositoryInfo{
+				Name:                 sbom.RepoName,
+				Modules:              []*models.SBOM{},
+				TotalComponents:      0,
+				TotalVulnerabilities: 0,
+				LastScanDate:         sbom.ScanDate.Format("2006-01-02 15:04"),
+				RiskLevel:            "low",
+			}
+		}
+
+		repo := repositoryGroups[sbom.RepoName]
+		repo.Modules = append(repo.Modules, sbom)
+		repo.TotalComponents += sbom.ComponentCount
+
+		// Update last scan date if this SBOM is more recent
+		lastScanTime, err := time.Parse("2006-01-02 15:04", repo.LastScanDate)
+		if err == nil && sbom.ScanDate.After(lastScanTime) {
+			repo.LastScanDate = sbom.ScanDate.Format("2006-01-02 15:04")
+		}
+	}
+
+	// Calculate vulnerability counts and risk levels for each repository
+	for _, repo := range repositoryGroups {
+		criticalCount, highCount := 0, 0
+
+		for _, sbom := range repo.Modules {
+			// Get vulnerabilities for this SBOM
+			vulns, err := ds.database.GetVulnerabilitiesBySBOM(sbom.ID)
+			if err == nil {
+				repo.TotalVulnerabilities += len(vulns)
+
+				for _, vuln := range vulns {
+					switch vuln.Severity {
+					case "Critical":
+						criticalCount++
+					case "High":
+						highCount++
+					}
+				}
+			}
+		}
+
+		// Determine risk level
+		if criticalCount > 0 {
+			repo.RiskLevel = "critical"
+		} else if highCount > 5 {
+			repo.RiskLevel = "high"
+		} else if highCount > 0 {
+			repo.RiskLevel = "medium"
+		} else {
+			repo.RiskLevel = "low"
+		}
+	}
+
 	return c.Render("sboms", fiber.Map{
-		"Title": "SBOM List",
-		"SBOMs": sboms,
+		"Title":            "Repository Management",
+		"SBOMs":            sboms, // For flat view
+		"RepositoryGroups": repositoryGroups,
 	})
 }
 
@@ -938,4 +1012,82 @@ func (ds *DashboardServer) handleAPILicensesBySBOM(c *fiber.Ctx) error {
 		"has_next":         page < totalPages,
 		"has_prev":         page > 1,
 	})
+}
+
+// Slack test request structure
+type SlackTestRequest struct {
+	WebhookURL string `json:"webhook_url"`
+	Channel    string `json:"channel"`
+}
+
+// handleAPISlackTest sends a test Slack notification
+func (ds *DashboardServer) handleAPISlackTest(c *fiber.Ctx) error {
+	var req SlackTestRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	if req.WebhookURL == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "webhook_url is required"})
+	}
+
+	// Create Slack notifier with test configuration
+	slackNotifier := notifier.NewSlackNotifier(
+		req.WebhookURL,
+		"OSS Compliance Scanner",
+		req.Channel,
+		":shield:",
+	)
+
+	// Validate configuration first
+	if err := slackNotifier.ValidateConfiguration(); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error":   "Invalid Slack configuration",
+			"details": err.Error(),
+		})
+	}
+
+	// Send a custom test message
+	testMessage := fmt.Sprintf(`🧪 *OSS Compliance Scanner - 알림 테스트*
+
+✅ Slack 알림 기능이 정상적으로 작동하고 있습니다.
+
+*시스템 정보:* OSS Compliance Scanner v1.0.0
+*테스트 시간:* %s
+*참고사항:* 이 메시지는 관리자 페이지에서 발송된 테스트 알림입니다.`,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	if err := slackNotifier.SendCustomMessage(testMessage, req.Channel); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":   "Failed to send Slack test notification",
+			"details": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Slack 테스트 알림이 성공적으로 전송되었습니다.",
+	})
+}
+
+// sendSlackMessage is a helper function to send Slack messages
+func (ds *DashboardServer) sendSlackMessage(slackNotifier *notifier.SlackNotifier, message *notifier.SlackMessage) error {
+	// Use the notifier's SendCustomMessage method for simple text
+	if len(message.Attachments) == 0 {
+		return slackNotifier.SendCustomMessage(message.Text, message.Channel)
+	}
+
+	// For messages with attachments, convert to text format
+	messageText := message.Text
+	if len(message.Attachments) > 0 {
+		attachment := message.Attachments[0]
+		if len(attachment.Fields) > 0 {
+			messageText += "\n\n"
+			for _, field := range attachment.Fields {
+				messageText += fmt.Sprintf("*%s:* %s\n", field.Title, field.Value)
+			}
+		}
+	}
+
+	return slackNotifier.SendCustomMessage(messageText, message.Channel)
 }
