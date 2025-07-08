@@ -1,0 +1,434 @@
+{{define "violations"}}
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">
+        <i class="bi bi-exclamation-triangle text-warning"></i>
+        정책 위반 관리
+    </h1>
+    <div>
+        <button class="btn btn-primary" onclick="refreshViolations()">
+            <i class="bi bi-arrow-clockwise"></i>
+            새로고침
+        </button>
+        <button class="btn btn-success ms-2" onclick="exportViolations()">
+            <i class="bi bi-download"></i>
+            내보내기
+        </button>
+    </div>
+</div>
+
+<!-- 위반 통계 -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card border-danger">
+            <div class="card-body text-center">
+                <h4 class="text-danger" id="openViolations">0</h4>
+                <small class="text-muted">미해결 위반</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-warning">
+            <div class="card-body text-center">
+                <h4 class="text-warning" id="licenseViolations">0</h4>
+                <small class="text-muted">라이선스 위반</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-info">
+            <div class="card-body text-center">
+                <h4 class="text-info" id="vulnViolations">0</h4>
+                <small class="text-muted">취약점 위반</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-success">
+            <div class="card-body text-center">
+                <h4 class="text-success" id="resolvedViolations">0</h4>
+                <small class="text-muted">해결된 위반</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 필터 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-3">
+                <label for="violationTypeFilter" class="form-label">위반 유형</label>
+                <select class="form-select" id="violationTypeFilter" onchange="filterViolations()">
+                    <option value="">모든 유형</option>
+                    <option value="license">라이선스 위반</option>
+                    <option value="vulnerability">취약점 위반</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="severityFilter" class="form-label">심각도</label>
+                <select class="form-select" id="severityFilter" onchange="filterViolations()">
+                    <option value="">모든 심각도</option>
+                    <option value="Critical">Critical</option>
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="statusFilter" class="form-label">상태</label>
+                <select class="form-select" id="statusFilter" onchange="filterViolations()">
+                    <option value="">모든 상태</option>
+                    <option value="open">미해결</option>
+                    <option value="resolved">해결됨</option>
+                    <option value="ignored">무시됨</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="repoFilter" class="form-label">저장소</label>
+                <select class="form-select" id="repoFilter" onchange="filterViolations()">
+                    <option value="">모든 저장소</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 위반 목록 -->
+<div class="card">
+    <div class="card-header">
+        <h6 class="m-0 font-weight-bold text-primary">
+            <i class="bi bi-list-ul"></i>
+            정책 위반 목록
+            <span class="badge bg-secondary ms-2" id="totalViolations">0</span>
+        </h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover" id="violationsTable">
+                <thead>
+                    <tr>
+                        <th>위반 유형</th>
+                        <th>심각도</th>
+                        <th>컴포넌트</th>
+                        <th>저장소</th>
+                        <th>설명</th>
+                        <th>상태</th>
+                        <th>발견일</th>
+                        <th>액션</th>
+                    </tr>
+                </thead>
+                <tbody id="violationsTableBody">
+                    <tr>
+                        <td colspan="8" class="text-center text-muted">
+                            <i class="bi bi-hourglass-split"></i>
+                            로딩 중...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 위반 상세 모달 -->
+<div class="modal fade" id="violationModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">정책 위반 상세 정보</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 내용이 동적으로 채워집니다 -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                <button type="button" class="btn btn-success" onclick="resolveViolation()">해결됨으로 표시</button>
+                <button type="button" class="btn btn-warning" onclick="ignoreViolation()">무시</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let violations = [];
+let filteredViolations = [];
+
+// 페이지 로드 시 위반 데이터 로드
+document.addEventListener('DOMContentLoaded', function() {
+    loadViolations();
+});
+
+// 위반 데이터 로드
+async function loadViolations() {
+    try {
+        const response = await fetch('/api/v1/violations');
+        if (!response.ok) {
+            throw new Error('Failed to fetch violations');
+        }
+        
+        violations = await response.json();
+        filteredViolations = [...violations];
+        
+        updateStatistics();
+        updateViolationsTable();
+        updateFilters();
+    } catch (error) {
+        console.error('Error loading violations:', error);
+        document.getElementById('violationsTableBody').innerHTML = 
+            '<tr><td colspan="8" class="text-center text-danger">데이터 로드 실패</td></tr>';
+    }
+}
+
+// 통계 업데이트
+function updateStatistics() {
+    const openCount = violations.filter(v => v.status === 'open').length;
+    const licenseCount = violations.filter(v => v.violation_type === 'license').length;
+    const vulnCount = violations.filter(v => v.violation_type === 'vulnerability').length;
+    const resolvedCount = violations.filter(v => v.status === 'resolved').length;
+    
+    document.getElementById('openViolations').textContent = openCount;
+    document.getElementById('licenseViolations').textContent = licenseCount;
+    document.getElementById('vulnViolations').textContent = vulnCount;
+    document.getElementById('resolvedViolations').textContent = resolvedCount;
+    document.getElementById('totalViolations').textContent = violations.length;
+}
+
+// 위반 테이블 업데이트
+function updateViolationsTable() {
+    const tbody = document.getElementById('violationsTableBody');
+    
+    if (filteredViolations.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">정책 위반이 없습니다</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = filteredViolations.map(violation => `
+        <tr>
+            <td>
+                <span class="badge bg-${violation.violation_type === 'license' ? 'warning' : 'danger'}">
+                    ${violation.violation_type === 'license' ? '라이선스' : '취약점'}
+                </span>
+            </td>
+            <td>
+                <span class="badge severity-${violation.severity.toLowerCase()}">${violation.severity}</span>
+            </td>
+            <td>
+                <strong>${violation.component_name || 'Unknown'}</strong><br>
+                <small class="text-muted">${violation.component_version || 'Unknown'}</small>
+            </td>
+            <td>
+                <span class="badge bg-secondary">${violation.repo_name || 'Unknown'}</span>
+            </td>
+            <td>
+                <div class="text-truncate" style="max-width: 200px;" title="${violation.description || ''}">
+                    ${violation.description || '설명 없음'}
+                </div>
+            </td>
+            <td>
+                <span class="badge bg-${getStatusColor(violation.status)}">
+                    ${getStatusText(violation.status)}
+                </span>
+            </td>
+            <td>
+                ${violation.created_at ? new Date(violation.created_at).toLocaleDateString() : 'N/A'}
+            </td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showViolationDetail(${violation.id})">
+                    <i class="bi bi-eye"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// 필터 업데이트
+function updateFilters() {
+    const repos = [...new Set(violations.map(v => v.repo_name).filter(Boolean))];
+    const repoFilter = document.getElementById('repoFilter');
+    
+    repos.forEach(repo => {
+        const option = document.createElement('option');
+        option.value = repo;
+        option.textContent = repo;
+        repoFilter.appendChild(option);
+    });
+}
+
+// 위반 필터링
+function filterViolations() {
+    const typeFilter = document.getElementById('violationTypeFilter').value;
+    const severityFilter = document.getElementById('severityFilter').value;
+    const statusFilter = document.getElementById('statusFilter').value;
+    const repoFilter = document.getElementById('repoFilter').value;
+    
+    filteredViolations = violations.filter(violation => {
+        // 위반 유형 필터
+        if (typeFilter && violation.violation_type !== typeFilter) {
+            return false;
+        }
+        
+        // 심각도 필터
+        if (severityFilter && violation.severity !== severityFilter) {
+            return false;
+        }
+        
+        // 상태 필터
+        if (statusFilter && violation.status !== statusFilter) {
+            return false;
+        }
+        
+        // 저장소 필터
+        if (repoFilter && violation.repo_name !== repoFilter) {
+            return false;
+        }
+        
+        return true;
+    });
+    
+    updateViolationsTable();
+}
+
+// 상태 색상 반환
+function getStatusColor(status) {
+    switch (status) {
+        case 'open':
+            return 'danger';
+        case 'resolved':
+            return 'success';
+        case 'ignored':
+            return 'secondary';
+        default:
+            return 'secondary';
+    }
+}
+
+// 상태 텍스트 반환
+function getStatusText(status) {
+    switch (status) {
+        case 'open':
+            return '미해결';
+        case 'resolved':
+            return '해결됨';
+        case 'ignored':
+            return '무시됨';
+        default:
+            return '알 수 없음';
+    }
+}
+
+// 위반 새로고침
+function refreshViolations() {
+    loadViolations();
+}
+
+// 위반 상세 정보 표시
+function showViolationDetail(violationId) {
+    const violation = violations.find(v => v.id === violationId);
+    if (!violation) return;
+    
+    document.getElementById('modalTitle').textContent = `정책 위반: ${violation.violation_type}`;
+    
+    const modalBody = document.getElementById('modalBody');
+    modalBody.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <h6>기본 정보</h6>
+                <table class="table table-sm">
+                    <tr><td><strong>위반 유형:</strong></td><td>${violation.violation_type}</td></tr>
+                    <tr><td><strong>심각도:</strong></td><td><span class="badge severity-${violation.severity.toLowerCase()}">${violation.severity}</span></td></tr>
+                    <tr><td><strong>상태:</strong></td><td><span class="badge bg-${getStatusColor(violation.status)}">${getStatusText(violation.status)}</span></td></tr>
+                    <tr><td><strong>발견일:</strong></td><td>${violation.created_at ? new Date(violation.created_at).toLocaleString() : 'N/A'}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6>컴포넌트 정보</h6>
+                <table class="table table-sm">
+                    <tr><td><strong>이름:</strong></td><td>${violation.component_name || 'Unknown'}</td></tr>
+                    <tr><td><strong>버전:</strong></td><td>${violation.component_version || 'Unknown'}</td></tr>
+                    <tr><td><strong>저장소:</strong></td><td>${violation.repo_name || 'Unknown'}</td></tr>
+                    <tr><td><strong>모듈:</strong></td><td>${violation.module_path || 'Unknown'}</td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-12">
+                <h6>설명</h6>
+                <p>${violation.description || '설명이 없습니다.'}</p>
+            </div>
+        </div>
+        ${violation.recommended_action ? `
+        <div class="row mt-3">
+            <div class="col-12">
+                <h6>권장 조치</h6>
+                <p>${violation.recommended_action}</p>
+            </div>
+        </div>
+        ` : ''}
+    `;
+    
+    // 현재 위반 ID를 모달에 저장
+    document.getElementById('violationModal').setAttribute('data-violation-id', violationId);
+    
+    new bootstrap.Modal(document.getElementById('violationModal')).show();
+}
+
+// 위반 해결
+async function resolveViolation() {
+    const violationId = document.getElementById('violationModal').getAttribute('data-violation-id');
+    if (!violationId) return;
+    
+    try {
+        const response = await fetch(`/api/v1/violations/${violationId}/resolve`, {
+            method: 'PUT'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to resolve violation');
+        }
+        
+        // 모달 닫기
+        bootstrap.Modal.getInstance(document.getElementById('violationModal')).hide();
+        
+        // 위반 다시 로드
+        await loadViolations();
+        
+    } catch (error) {
+        console.error('Error resolving violation:', error);
+        alert('위반 해결에 실패했습니다.');
+    }
+}
+
+// 위반 무시
+async function ignoreViolation() {
+    const violationId = document.getElementById('violationModal').getAttribute('data-violation-id');
+    if (!violationId) return;
+    
+    try {
+        const response = await fetch(`/api/v1/violations/${violationId}/ignore`, {
+            method: 'PUT'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to ignore violation');
+        }
+        
+        // 모달 닫기
+        bootstrap.Modal.getInstance(document.getElementById('violationModal')).hide();
+        
+        // 위반 다시 로드
+        await loadViolations();
+        
+    } catch (error) {
+        console.error('Error ignoring violation:', error);
+        alert('위반 무시에 실패했습니다.');
+    }
+}
+
+// 위반 내보내기
+function exportViolations() {
+    // CSV 내보내기 기능 구현
+    alert('내보내기 기능은 추후 구현 예정입니다.');
+}
+</script>
+{{end}} 

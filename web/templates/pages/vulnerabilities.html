@@ -1,0 +1,354 @@
+{{define "vulnerabilities"}}
+<div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">
+        <i class="bi bi-bug text-danger"></i>
+        취약점 관리
+    </h1>
+    <div>
+        <button class="btn btn-primary" onclick="refreshVulnerabilities()">
+            <i class="bi bi-arrow-clockwise"></i>
+            새로고침
+        </button>
+    </div>
+</div>
+
+<!-- 필터 및 검색 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-3">
+                <label for="severityFilter" class="form-label">심각도</label>
+                <select class="form-select" id="severityFilter" onchange="filterVulnerabilities()">
+                    <option value="">모든 심각도</option>
+                    <option value="Critical">Critical</option>
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="repoFilter" class="form-label">저장소</label>
+                <select class="form-select" id="repoFilter" onchange="filterVulnerabilities()">
+                    <option value="">모든 저장소</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="searchInput" class="form-label">검색</label>
+                <input type="text" class="form-control" id="searchInput" placeholder="CVE ID, 컴포넌트명, 설명..." onkeyup="filterVulnerabilities()">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <div class="d-grid">
+                    <button class="btn btn-outline-secondary" onclick="clearFilters()">
+                        <i class="bi bi-x-circle"></i>
+                        필터 초기화
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 취약점 통계 -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card border-danger">
+            <div class="card-body text-center">
+                <h4 class="text-danger" id="criticalCount">0</h4>
+                <small class="text-muted">Critical</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-warning">
+            <div class="card-body text-center">
+                <h4 class="text-warning" id="highCount">0</h4>
+                <small class="text-muted">High</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-info">
+            <div class="card-body text-center">
+                <h4 class="text-info" id="mediumCount">0</h4>
+                <small class="text-muted">Medium</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-success">
+            <div class="card-body text-center">
+                <h4 class="text-success" id="lowCount">0</h4>
+                <small class="text-muted">Low</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 취약점 목록 -->
+<div class="card">
+    <div class="card-header">
+        <h6 class="m-0 font-weight-bold text-primary">
+            <i class="bi bi-list-ul"></i>
+            취약점 목록
+            <span class="badge bg-secondary ms-2" id="totalCount">0</span>
+        </h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover" id="vulnerabilitiesTable">
+                <thead>
+                    <tr>
+                        <th>심각도</th>
+                        <th>CVE ID</th>
+                        <th>컴포넌트</th>
+                        <th>저장소</th>
+                        <th>CVSS 점수</th>
+                        <th>발견일</th>
+                        <th>액션</th>
+                    </tr>
+                </thead>
+                <tbody id="vulnerabilitiesTableBody">
+                    <tr>
+                        <td colspan="7" class="text-center text-muted">
+                            <i class="bi bi-hourglass-split"></i>
+                            로딩 중...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 취약점 상세 모달 -->
+<div class="modal fade" id="vulnerabilityModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">취약점 상세 정보</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 내용이 동적으로 채워집니다 -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                <button type="button" class="btn btn-primary" onclick="exportVulnerability()">내보내기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let vulnerabilities = [];
+let filteredVulnerabilities = [];
+
+// 페이지 로드 시 취약점 데이터 로드
+document.addEventListener('DOMContentLoaded', function() {
+    loadVulnerabilities();
+});
+
+// 취약점 데이터 로드
+async function loadVulnerabilities() {
+    try {
+        const response = await fetch('/api/v1/vulnerabilities');
+        if (!response.ok) {
+            throw new Error('Failed to fetch vulnerabilities');
+        }
+        
+        vulnerabilities = await response.json();
+        filteredVulnerabilities = [...vulnerabilities];
+        
+        updateStatistics();
+        updateVulnerabilitiesTable();
+        updateFilters();
+    } catch (error) {
+        console.error('Error loading vulnerabilities:', error);
+        document.getElementById('vulnerabilitiesTableBody').innerHTML = 
+            '<tr><td colspan="7" class="text-center text-danger">데이터 로드 실패</td></tr>';
+    }
+}
+
+// 통계 업데이트
+function updateStatistics() {
+    const counts = {
+        Critical: 0,
+        High: 0,
+        Medium: 0,
+        Low: 0
+    };
+    
+    vulnerabilities.forEach(vuln => {
+        const severity = vuln.severity || 'Unknown';
+        if (counts.hasOwnProperty(severity)) {
+            counts[severity]++;
+        }
+    });
+    
+    document.getElementById('criticalCount').textContent = counts.Critical;
+    document.getElementById('highCount').textContent = counts.High;
+    document.getElementById('mediumCount').textContent = counts.Medium;
+    document.getElementById('lowCount').textContent = counts.Low;
+    document.getElementById('totalCount').textContent = vulnerabilities.length;
+}
+
+// 취약점 테이블 업데이트
+function updateVulnerabilitiesTable() {
+    const tbody = document.getElementById('vulnerabilitiesTableBody');
+    
+    if (filteredVulnerabilities.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">취약점이 없습니다</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = filteredVulnerabilities.map(vuln => `
+        <tr>
+            <td>
+                <span class="badge severity-${vuln.severity.toLowerCase()}">${vuln.severity}</span>
+            </td>
+            <td>
+                <a href="#" onclick="showVulnerabilityDetail('${vuln.vuln_id}')" class="text-decoration-none">
+                    ${vuln.vuln_id}
+                </a>
+            </td>
+            <td>
+                <strong>${vuln.metadata?.component_name || 'Unknown'}</strong><br>
+                <small class="text-muted">${vuln.metadata?.component_version || 'Unknown'}</small>
+            </td>
+            <td>
+                <span class="badge bg-secondary">${vuln.metadata?.repo_name || 'Unknown'}</span>
+            </td>
+            <td>
+                ${vuln.cvss3_score ? `CVSS 3.x: ${vuln.cvss3_score}` : 'N/A'}
+            </td>
+            <td>
+                ${vuln.created_at ? new Date(vuln.created_at).toLocaleDateString() : 'N/A'}
+            </td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary" onclick="showVulnerabilityDetail('${vuln.vuln_id}')">
+                    <i class="bi bi-eye"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// 필터 업데이트
+function updateFilters() {
+    const repos = [...new Set(vulnerabilities.map(v => v.metadata?.repo_name).filter(Boolean))];
+    const repoFilter = document.getElementById('repoFilter');
+    
+    repos.forEach(repo => {
+        const option = document.createElement('option');
+        option.value = repo;
+        option.textContent = repo;
+        repoFilter.appendChild(option);
+    });
+}
+
+// 취약점 필터링
+function filterVulnerabilities() {
+    const severityFilter = document.getElementById('severityFilter').value;
+    const repoFilter = document.getElementById('repoFilter').value;
+    const searchInput = document.getElementById('searchInput').value.toLowerCase();
+    
+    filteredVulnerabilities = vulnerabilities.filter(vuln => {
+        // 심각도 필터
+        if (severityFilter && vuln.severity !== severityFilter) {
+            return false;
+        }
+        
+        // 저장소 필터
+        if (repoFilter && vuln.metadata?.repo_name !== repoFilter) {
+            return false;
+        }
+        
+        // 검색 필터
+        if (searchInput) {
+            const searchText = `${vuln.vuln_id} ${vuln.metadata?.component_name || ''} ${vuln.description || ''}`.toLowerCase();
+            if (!searchText.includes(searchInput)) {
+                return false;
+            }
+        }
+        
+        return true;
+    });
+    
+    updateVulnerabilitiesTable();
+}
+
+// 필터 초기화
+function clearFilters() {
+    document.getElementById('severityFilter').value = '';
+    document.getElementById('repoFilter').value = '';
+    document.getElementById('searchInput').value = '';
+    filteredVulnerabilities = [...vulnerabilities];
+    updateVulnerabilitiesTable();
+}
+
+// 취약점 새로고침
+function refreshVulnerabilities() {
+    loadVulnerabilities();
+}
+
+// 취약점 상세 정보 표시
+function showVulnerabilityDetail(vulnId) {
+    const vuln = vulnerabilities.find(v => v.vuln_id === vulnId);
+    if (!vuln) return;
+    
+    document.getElementById('modalTitle').textContent = `취약점: ${vuln.vuln_id}`;
+    
+    const modalBody = document.getElementById('modalBody');
+    modalBody.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <h6>기본 정보</h6>
+                <table class="table table-sm">
+                    <tr><td><strong>CVE ID:</strong></td><td>${vuln.vuln_id}</td></tr>
+                    <tr><td><strong>심각도:</strong></td><td><span class="badge severity-${vuln.severity.toLowerCase()}">${vuln.severity}</span></td></tr>
+                    <tr><td><strong>CVSS 3.x:</strong></td><td>${vuln.cvss3_score || 'N/A'}</td></tr>
+                    <tr><td><strong>CVSS 2.x:</strong></td><td>${vuln.cvss2_score || 'N/A'}</td></tr>
+                    <tr><td><strong>발견일:</strong></td><td>${vuln.created_at ? new Date(vuln.created_at).toLocaleString() : 'N/A'}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <h6>컴포넌트 정보</h6>
+                <table class="table table-sm">
+                    <tr><td><strong>이름:</strong></td><td>${vuln.metadata?.component_name || 'Unknown'}</td></tr>
+                    <tr><td><strong>버전:</strong></td><td>${vuln.metadata?.component_version || 'Unknown'}</td></tr>
+                    <tr><td><strong>타입:</strong></td><td>${vuln.metadata?.component_type || 'Unknown'}</td></tr>
+                    <tr><td><strong>저장소:</strong></td><td>${vuln.metadata?.repo_name || 'Unknown'}</td></tr>
+                    <tr><td><strong>모듈:</strong></td><td>${vuln.metadata?.module_path || 'Unknown'}</td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="row mt-3">
+            <div class="col-12">
+                <h6>설명</h6>
+                <p>${vuln.description || '설명이 없습니다.'}</p>
+            </div>
+        </div>
+        ${vuln.metadata?.data_source ? `
+        <div class="row mt-3">
+            <div class="col-12">
+                <h6>참고 링크</h6>
+                <a href="${vuln.metadata.data_source}" target="_blank" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-box-arrow-up-right"></i>
+                    상세 정보 보기
+                </a>
+            </div>
+        </div>
+        ` : ''}
+    `;
+    
+    new bootstrap.Modal(document.getElementById('vulnerabilityModal')).show();
+}
+
+// 취약점 내보내기
+function exportVulnerability() {
+    // CSV 내보내기 기능 구현
+    alert('내보내기 기능은 추후 구현 예정입니다.');
+}
+</script>
+{{end}} 

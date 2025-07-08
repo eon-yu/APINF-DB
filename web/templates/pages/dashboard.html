@@ -1,7 +1,24 @@
+{{define "dashboard"}}
 <!-- 통계 카드들 -->
 <div class="row mb-4">
     <div class="col-xl-3 col-md-6 mb-4">
         <div class="card stat-card">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-uppercase mb-1">총 SBOM</div>
+                        <div class="h5 mb-0 font-weight-bold">{{.Stats.total_sboms}}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="bi bi-file-earmark-text text-white" style="font-size: 2rem;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6 mb-4">
+        <div class="card stat-card info">
             <div class="card-body">
                 <div class="row no-gutters align-items-center">
                     <div class="col mr-2">
@@ -186,7 +203,7 @@
                     </a>
                     <a href="/reports" class="btn btn-outline-info">
                         <i class="bi bi-graph-up"></i>
-                        보고서 생성
+                        스캔 보고서
                     </a>
                 </div>
             </div>
@@ -194,51 +211,48 @@
     </div>
 </div>
 
+<!-- Charts JavaScript -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // 취약점 심각도 파이 차트
-    const ctx = document.getElementById('severityChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: ['Critical', 'High', 'Medium', 'Low'],
-            datasets: [{
-                data: [
-                    parseInt('{{.Stats.critical_vulns}}') || 0,
-                    parseInt('{{.Stats.high_vulns}}') || 0,
-                    parseInt('{{.Stats.medium_vulns}}') || 0,
-                    parseInt('{{.Stats.low_vulns}}') || 0
-                ],
-                backgroundColor: [
-                    '#dc3545',
-                    '#fd7e14',
-                    '#ffc107',
-                    '#28a745'
-                ],
-                borderWidth: 2,
-                borderColor: '#fff'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const label = context.label || '';
-                            const value = context.parsed;
-                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-                            return label + ': ' + value + ' (' + percentage + '%)';
+    // 취약점 심각도 분포 차트
+    const ctx = document.getElementById('severityChart');
+    if (ctx) {
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Critical', 'High', 'Medium', 'Low'],
+                datasets: [{
+                    data: [
+                        parseInt('{{.Stats.critical_vulns}}') || 0,
+                        parseInt('{{.Stats.high_vulns}}') || 0,
+                        parseInt('{{.Stats.medium_vulns}}') || 0,
+                        parseInt('{{.Stats.low_vulns}}') || 0
+                    ],
+                    backgroundColor: [
+                        '#dc3545', // Critical - Red
+                        '#fd7e14', // High - Orange  
+                        '#ffc107', // Medium - Yellow
+                        '#28a745'  // Low - Green
+                    ],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true
                         }
                     }
                 }
             }
-        }
-    });
+        });
+    }
 });
-</script> 
+</script>
+{{end}} 

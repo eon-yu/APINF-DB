@@ -153,6 +153,43 @@ func (db *Database) GetLatestSBOM(repoName, modulePath string) (*models.SBOM, er
 	return sbom, nil
 }
 
+// GetAllSBOMs retrieves all SBOMs with limit
+func (db *Database) GetAllSBOMs(limit int) ([]*models.SBOM, error) {
+	query := `
+		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom, 
+		       component_count, created_at, updated_at
+		FROM sboms 
+		ORDER BY scan_date DESC
+		LIMIT ?
+	`
+
+	rows, err := db.conn.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query SBOMs: %w", err)
+	}
+	defer rows.Close()
+
+	var sboms []*models.SBOM
+	for rows.Next() {
+		sbom := &models.SBOM{}
+		err := rows.Scan(
+			&sbom.ID, &sbom.RepoName, &sbom.ModulePath, &sbom.ScanDate,
+			&sbom.SyftVersion, &sbom.RawSBOM, &sbom.ComponentCount,
+			&sbom.CreatedAt, &sbom.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan SBOM: %w", err)
+		}
+		sboms = append(sboms, sbom)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating SBOMs: %w", err)
+	}
+
+	return sboms, nil
+}
+
 // Component Operations
 
 // CreateComponent creates a new component record
@@ -259,14 +296,14 @@ func (db *Database) CreateVulnerability(vuln *models.Vulnerability) error {
 	return nil
 }
 
-// GetVulnerabilitiesByComponent retrieves all vulnerabilities for a component
+// GetVulnerabilitiesByComponent retrieves vulnerabilities for a specific component
 func (db *Database) GetVulnerabilitiesByComponent(componentID int) ([]*models.Vulnerability, error) {
 	query := `
-		SELECT id, component_id, vuln_id, severity, cvss3_score, cvss2_score,
-		       description, published_date, modified_date, urls_json, fixes_json,
-		       metadata_json, created_at, updated_at
-		FROM vulnerabilities WHERE component_id = ?
-		ORDER BY severity DESC, cvss3_score DESC
+		SELECT id, component_id, vuln_id, severity, cvss2_score, cvss3_score, description, 
+		       urls_json, published_date, modified_date, fixes_json, metadata_json, created_at, updated_at
+		FROM vulnerabilities 
+		WHERE component_id = ?
+		ORDER BY severity DESC, created_at DESC
 	`
 
 	rows, err := db.conn.Query(query, componentID)
@@ -280,8 +317,8 @@ func (db *Database) GetVulnerabilitiesByComponent(componentID int) ([]*models.Vu
 		vuln := &models.Vulnerability{}
 		err := rows.Scan(
 			&vuln.ID, &vuln.ComponentID, &vuln.VulnID, &vuln.Severity,
-			&vuln.CVSS3Score, &vuln.CVSS2Score, &vuln.Description,
-			&vuln.PublishedDate, &vuln.ModifiedDate, &vuln.URLsJSON,
+			&vuln.CVSS2Score, &vuln.CVSS3Score, &vuln.Description,
+			&vuln.URLsJSON, &vuln.PublishedDate, &vuln.ModifiedDate,
 			&vuln.FixesJSON, &vuln.MetadataJSON, &vuln.CreatedAt, &vuln.UpdatedAt,
 		)
 		if err != nil {
@@ -292,6 +329,68 @@ func (db *Database) GetVulnerabilitiesByComponent(componentID int) ([]*models.Vu
 		if err := vuln.UnmarshalVulnerabilityFields(); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal vulnerability fields: %w", err)
 		}
+
+		vulnerabilities = append(vulnerabilities, vuln)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating vulnerabilities: %w", err)
+	}
+
+	return vulnerabilities, nil
+}
+
+// GetAllVulnerabilities retrieves all vulnerabilities with component information
+func (db *Database) GetAllVulnerabilities(limit int) ([]*models.Vulnerability, error) {
+	query := `
+		SELECT v.id, v.component_id, v.vuln_id, v.severity, v.cvss2_score, v.cvss3_score, 
+		       v.description, v.urls_json, v.published_date, v.modified_date, v.fixes_json, 
+		       v.metadata_json, v.created_at, v.updated_at,
+		       c.name as component_name, c.version as component_version, c.type as component_type,
+		       s.repo_name, s.module_path
+		FROM vulnerabilities v
+		JOIN components c ON v.component_id = c.id
+		JOIN sboms s ON c.sbom_id = s.id
+		ORDER BY v.severity DESC, v.created_at DESC
+		LIMIT ?
+	`
+
+	rows, err := db.conn.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all vulnerabilities: %w", err)
+	}
+	defer rows.Close()
+
+	var vulnerabilities []*models.Vulnerability
+	for rows.Next() {
+		vuln := &models.Vulnerability{}
+		var componentName, componentVersion, componentType, repoName, modulePath string
+
+		err := rows.Scan(
+			&vuln.ID, &vuln.ComponentID, &vuln.VulnID, &vuln.Severity,
+			&vuln.CVSS2Score, &vuln.CVSS3Score, &vuln.Description,
+			&vuln.URLsJSON, &vuln.PublishedDate, &vuln.ModifiedDate,
+			&vuln.FixesJSON, &vuln.MetadataJSON, &vuln.CreatedAt, &vuln.UpdatedAt,
+			&componentName, &componentVersion, &componentType, &repoName, &modulePath,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan vulnerability: %w", err)
+		}
+
+		// Unmarshal JSON fields
+		if err := vuln.UnmarshalVulnerabilityFields(); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal vulnerability fields: %w", err)
+		}
+
+		// Add component and repository info to metadata
+		if vuln.Metadata == nil {
+			vuln.Metadata = make(map[string]interface{})
+		}
+		vuln.Metadata["component_name"] = componentName
+		vuln.Metadata["component_version"] = componentVersion
+		vuln.Metadata["component_type"] = componentType
+		vuln.Metadata["repo_name"] = repoName
+		vuln.Metadata["module_path"] = modulePath
 
 		vulnerabilities = append(vulnerabilities, vuln)
 	}
@@ -499,4 +598,51 @@ func (db *Database) GetLatestScanResults(limit int) ([]*models.ScanResult, error
 	}
 
 	return results, nil
+}
+
+// Ping checks database connectivity
+func (db *Database) Ping() error {
+	return db.conn.Ping()
+}
+
+// DeleteLicensePolicy deletes a license policy by ID
+func (db *Database) DeleteLicensePolicy(id int) error {
+	query := `DELETE FROM license_policies WHERE id = ?`
+
+	result, err := db.conn.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete license policy: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("license policy not found with ID %d", id)
+	}
+
+	return nil
+}
+
+// DeleteVulnerabilityPolicy deletes a vulnerability policy by ID
+func (db *Database) DeleteVulnerabilityPolicy(id int) error {
+	query := `DELETE FROM vulnerability_policies WHERE id = ?`
+
+	result, err := db.conn.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete vulnerability policy: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("vulnerability policy not found with ID %d", id)
+	}
+
+	return nil
 }
