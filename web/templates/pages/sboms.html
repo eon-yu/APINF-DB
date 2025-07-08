@@ -42,6 +42,7 @@
 <!-- 저장소별 보기 -->
 <div id="repositoryView" class="repository-view">
     <div class="row">
+        {{if .RepositoryGroups}}
         {{range $repoName, $repoInfo := .RepositoryGroups}}
         <div class="col-12 mb-4 repository-card" data-repo="{{$repoName}}">
             <div class="card">
@@ -227,6 +228,7 @@
         {{end}}
     </div>
 </div>
+{{end}}
 
 <!-- 평면 보기 (기존 스타일) -->
 <div id="flatView" class="flat-view" style="display: none;">
