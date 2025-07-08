@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -605,6 +606,7 @@ func discoverWorkspaceTargets(repoPath string) []string {
 
 	// Check for common workspace configuration files
 	workspaceFiles := []string{
+		"package.json",        // Package.json with workspaces field
 		"workspace.yaml",      // Generic workspace
 		"lerna.json",          // Lerna monorepo
 		"nx.json",             // Nx monorepo
@@ -653,9 +655,26 @@ func discoverWorkspaceTargets(repoPath string) []string {
 
 // parsePackageJsonWorkspaces parses package.json for workspace definitions
 func parsePackageJsonWorkspaces(packagePath string) []string {
-	// This is a simplified implementation
-	// In a real implementation, you would parse the JSON and extract workspace patterns
-	return []string{}
+	data, err := os.ReadFile(packagePath)
+	if err != nil {
+		if verbose {
+			log.Printf("Failed to read package.json: %v", err)
+		}
+		return []string{}
+	}
+
+	var packageJSON struct {
+		Workspaces []string `json:"workspaces"`
+	}
+
+	if err := json.Unmarshal(data, &packageJSON); err != nil {
+		if verbose {
+			log.Printf("Failed to parse package.json: %v", err)
+		}
+		return []string{}
+	}
+
+	return packageJSON.Workspaces
 }
 
 // parseLernaWorkspaces parses lerna.json for workspace definitions

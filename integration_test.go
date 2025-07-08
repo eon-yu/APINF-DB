@@ -675,6 +675,10 @@ func TestEndToEndWorkflows(t *testing.T) {
 		require.NoError(t, err)
 		defer database.Close()
 
+		// Run migrations to ensure tables exist
+		err = database.RunMigrations()
+		require.NoError(t, err)
+
 		// Create license policy
 		timestamp := time.Now().UnixNano()
 		licensePolicy := &models.LicensePolicy{
@@ -698,11 +702,21 @@ func TestEndToEndWorkflows(t *testing.T) {
 		// Verify policies can be retrieved
 		licensePolicies, err := database.GetActiveLicensePolicies()
 		require.NoError(t, err)
-		assert.Len(t, licensePolicies, 1)
+		assert.GreaterOrEqual(t, len(licensePolicies), 1) // Should have at least our created policy + default policies
 
 		vulnPolicies, err := database.GetActiveVulnerabilityPolicies()
 		require.NoError(t, err)
-		assert.Len(t, vulnPolicies, 1)
+		assert.GreaterOrEqual(t, len(vulnPolicies), 1) // Should have at least our created policy + default policies
+
+		// Verify our specific policy exists
+		var foundLicensePolicy bool
+		for _, policy := range licensePolicies {
+			if policy.LicenseName == licensePolicy.LicenseName {
+				foundLicensePolicy = true
+				break
+			}
+		}
+		assert.True(t, foundLicensePolicy, "Should find the created license policy")
 
 		// Test policy deletion
 		err = database.DeleteLicensePolicy(licensePolicy.ID)
@@ -710,7 +724,17 @@ func TestEndToEndWorkflows(t *testing.T) {
 
 		remainingPolicies, err := database.GetActiveLicensePolicies()
 		require.NoError(t, err)
-		assert.Empty(t, remainingPolicies)
+
+		// Verify our specific policy was deleted (but default policies remain)
+		var foundAfterDeletion bool
+		for _, policy := range remainingPolicies {
+			if policy.LicenseName == licensePolicy.LicenseName {
+				foundAfterDeletion = true
+				break
+			}
+		}
+		assert.False(t, foundAfterDeletion, "Our specific policy should be deleted")
+		assert.GreaterOrEqual(t, len(remainingPolicies), 11) // Default policies should remain
 	})
 
 	// Test scan result workflow
@@ -725,6 +749,10 @@ func TestEndToEndWorkflows(t *testing.T) {
 		database, err := db.NewDatabase("sqlite3", dbPath)
 		require.NoError(t, err)
 		defer database.Close()
+
+		// Run migrations to ensure tables exist
+		err = database.RunMigrations()
+		require.NoError(t, err)
 
 		// Create SBOM for scan result
 		sbom := &models.SBOM{
@@ -967,5 +995,185 @@ func TestCppProjectScanning(t *testing.T) {
 		assert.True(t, found, "C++ project SBOM should be saved in database")
 
 		t.Logf("Successfully completed end-to-end C++ project scan")
+	})
+}
+
+func TestCLanguageVsCppDistinction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Test C vs C++ language distinction
+	cTestDir := "test-projects/c-app"
+	cppTestDir := "test-projects/cpp-app"
+
+	// Convert to absolute paths
+	absCTestDir, err := filepath.Abs(cTestDir)
+	require.NoError(t, err)
+	absCppTestDir, err := filepath.Abs(cppTestDir)
+	require.NoError(t, err)
+
+	// Verify test projects exist
+	if _, err := os.Stat(absCTestDir); os.IsNotExist(err) {
+		t.Skipf("C test project %s does not exist", absCTestDir)
+	}
+	if _, err := os.Stat(absCppTestDir); os.IsNotExist(err) {
+		t.Skipf("C++ test project %s does not exist", absCppTestDir)
+	}
+
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "c_vs_cpp_test_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Initialize components
+	cfg, err := config.LoadConfig("")
+	require.NoError(t, err)
+
+	// Create test database
+	dbPath := filepath.Join(tempDir, "c_vs_cpp_test.db")
+	database, err := db.NewDatabase("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer database.Close()
+
+	err = database.RunMigrations()
+	require.NoError(t, err)
+
+	syftScanner := scanner.NewSyftScanner(
+		cfg.Scanner.SyftPath,
+		cfg.Scanner.TempDir,
+		cfg.Scanner.CacheDir,
+		cfg.Scanner.TimeoutSeconds,
+	)
+
+	ctx := context.Background()
+
+	// Test C language detection
+	t.Run("DetectsCLanguage", func(t *testing.T) {
+		// Test language detection function directly
+		lang := scanner.DetectLanguageFromDirectory(absCTestDir)
+		assert.Equal(t, "c", lang, "Should detect C language in c-app project")
+
+		// Test ecosystem determination
+		ecosystem := scanner.DetermineEcosystemFromBuildFiles(absCTestDir)
+		assert.Equal(t, "make-c", ecosystem, "Should detect make-c ecosystem for C project")
+	})
+
+	// Test C++ language detection
+	t.Run("DetectsCppLanguage", func(t *testing.T) {
+		// Test language detection function directly
+		lang := scanner.DetectLanguageFromDirectory(absCppTestDir)
+		assert.Equal(t, "cpp", lang, "Should detect C++ language in cpp-app project")
+
+		// Test ecosystem determination for C++ package managers
+		ecosystem := scanner.DetermineEcosystemFromBuildFiles(absCppTestDir)
+		assert.True(t, ecosystem == "conan" || ecosystem == "cmake-cpp" || ecosystem == "vcpkg",
+			"Should detect conan, cmake-cpp, or vcpkg ecosystem for C++ project, got: %s", ecosystem)
+	})
+
+	// Test file extension distinction
+	t.Run("DistinguishesFileExtensions", func(t *testing.T) {
+		// Verify C project has .c files
+		found_c_files := false
+		err := filepath.Walk(absCTestDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if strings.HasSuffix(path, ".c") {
+				found_c_files = true
+			}
+			// Should not have C++ extensions
+			assert.False(t, strings.HasSuffix(path, ".cpp"), "C project should not have .cpp files")
+			assert.False(t, strings.HasSuffix(path, ".hpp"), "C project should not have .hpp files")
+			return nil
+		})
+		require.NoError(t, err)
+		assert.True(t, found_c_files, "C project should have .c files")
+
+		// Verify C++ project has .cpp files
+		found_cpp_files := false
+		err = filepath.Walk(absCppTestDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if strings.HasSuffix(path, ".cpp") {
+				found_cpp_files = true
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		assert.True(t, found_cpp_files, "C++ project should have .cpp files")
+	})
+
+	// Test build system distinction
+	t.Run("DistinguishesBuildSystems", func(t *testing.T) {
+		// C project should have Makefile
+		makefilePath := filepath.Join(absCTestDir, "Makefile")
+		_, err := os.Stat(makefilePath)
+		assert.NoError(t, err, "C project should have Makefile")
+
+		// C++ project should have modern package managers
+		conanfilePath := filepath.Join(absCppTestDir, "conanfile.txt")
+		cmakefilePath := filepath.Join(absCppTestDir, "CMakeLists.txt")
+		vcpkgPath := filepath.Join(absCppTestDir, "vcpkg.json")
+
+		hasConan := false
+		hasCMake := false
+		hasVcpkg := false
+
+		if _, err := os.Stat(conanfilePath); err == nil {
+			hasConan = true
+		}
+		if _, err := os.Stat(cmakefilePath); err == nil {
+			hasCMake = true
+		}
+		if _, err := os.Stat(vcpkgPath); err == nil {
+			hasVcpkg = true
+		}
+
+		assert.True(t, hasConan || hasCMake || hasVcpkg,
+			"C++ project should have at least one modern package manager file")
+	})
+
+	// Test SBOM generation differences (if components are found)
+	t.Run("GeneratesDifferentSBOMs", func(t *testing.T) {
+		// Generate SBOM for C project
+		cSbom, err := syftScanner.GenerateSBOM(ctx, absCTestDir, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, cSbom)
+
+		// Generate SBOM for C++ project
+		cppSbom, err := syftScanner.GenerateSBOM(ctx, absCppTestDir, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, cppSbom)
+
+		// Parse components
+		cComponents, err := syftScanner.ParseSBOMToComponents(cSbom)
+		require.NoError(t, err)
+
+		cppComponents, err := syftScanner.ParseSBOMToComponents(cppSbom)
+		require.NoError(t, err)
+
+		// C++ project should have more modern dependencies
+		assert.Greater(t, len(cppComponents), len(cComponents),
+			"C++ project should typically have more packaged dependencies than C project")
+
+		// Check for C++ specific libraries in C++ project
+		if len(cppComponents) > 0 {
+			foundCppLibraries := false
+			for _, comp := range cppComponents {
+				if strings.Contains(comp.Name, "boost") ||
+					strings.Contains(comp.Name, "nlohmann") ||
+					strings.Contains(comp.Name, "spdlog") {
+					foundCppLibraries = true
+					assert.Equal(t, "c++", comp.Language, "C++ libraries should be marked as c++ language")
+					break
+				}
+			}
+			assert.True(t, foundCppLibraries, "C++ project should contain C++ specific libraries")
+		}
+
+		t.Logf("C project components: %d", len(cComponents))
+		t.Logf("C++ project components: %d", len(cppComponents))
 	})
 }
