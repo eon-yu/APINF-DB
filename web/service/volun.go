@@ -4,7 +4,7 @@ import (
 	"oss-compliance-scanner/db"
 	"strconv"
 
-	"github.com/gofiber/fiber"
+	"github.com/gofiber/fiber/v2"
 )
 
 type VulnerabilityService struct {
