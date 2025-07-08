@@ -91,8 +91,8 @@
                         </li>
                         <li class="nav-item">
                             <a class="nav-link" href="/sboms">
-                                <i class="bi bi-file-earmark-text"></i>
-                                SBOM 목록
+                                <i class="bi bi-folder-symlink"></i>
+                                저장소 관리
                             </a>
                         </li>
                         <li class="nav-item">
@@ -150,7 +150,7 @@
                     <h1 class="h2">{{.Title}}</h1>
                 </div>
                 
-                {{if eq .Title "OSS Compliance Dashboard"}}{{template "dashboard" .}}{{else if eq .Title "SBOM List"}}{{template "sboms" .}}{{else if and (ne .SBOM nil) (ne .Components nil)}}{{template "sbom_detail" .}}{{else if eq .Title "Vulnerabilities"}}{{template "vulnerabilities" .}}{{else if eq .Title "Policy Management"}}{{template "policies" .}}{{else if eq .Title "Policy Violations"}}{{template "violations" .}}{{else if eq .Title "Scan Reports"}}{{template "reports" .}}{{else if eq .Title "Admin Settings"}}{{template "admin" .}}{{else}}{{template "dashboard" .}}{{end}}
+                {{if eq .Title "OSS Compliance Dashboard"}}{{template "dashboard" .}}{{else if or (eq .Title "SBOM List") (eq .Title "Repository Management")}}{{template "sboms" .}}{{else if and (ne .SBOM nil) (ne .Components nil)}}{{template "sbom_detail" .}}{{else if eq .Title "Vulnerabilities"}}{{template "vulnerabilities" .}}{{else if eq .Title "Policy Management"}}{{template "policies" .}}{{else if eq .Title "Policy Violations"}}{{template "violations" .}}{{else if eq .Title "Scan Reports"}}{{template "reports" .}}{{else if eq .Title "Admin Settings"}}{{template "admin" .}}{{else}}{{template "dashboard" .}}{{end}}
             </main>
         </div>
     </div>
