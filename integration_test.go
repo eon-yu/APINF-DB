@@ -2,17 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"oss-compliance-scanner/config"
 	"oss-compliance-scanner/db"
 	"oss-compliance-scanner/models"
+	"oss-compliance-scanner/scanner"
 	"oss-compliance-scanner/web"
 
 	"github.com/stretchr/testify/assert"
@@ -616,7 +620,7 @@ func TestEndToEndWorkflows(t *testing.T) {
 			RawSBOM:        `{"test": "e2e data"}`,
 			ComponentCount: 1,
 		}
-		err := database.CreateSBOM(sbom)
+		err = database.CreateSBOM(sbom)
 		require.NoError(t, err)
 		assert.Greater(t, sbom.ID, 0)
 
@@ -770,5 +774,198 @@ func TestEndToEndWorkflows(t *testing.T) {
 			}
 		}
 		assert.True(t, found, "Should find the created scan result")
+	})
+}
+
+func TestCppProjectScanning(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Test C++ project scanning with Conan package manager
+	testDir := "test-projects/cpp-app"
+
+	// Convert to absolute path
+	absTestDir, err := filepath.Abs(testDir)
+	require.NoError(t, err)
+
+	// Verify test project exists
+	if _, err := os.Stat(absTestDir); os.IsNotExist(err) {
+		t.Skipf("Test project %s does not exist", absTestDir)
+	}
+
+	// Create temporary directory for test files
+	tempDir, err := os.MkdirTemp("", "cpp_integration_test_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Initialize components
+	cfg, err := config.LoadConfig("")
+	require.NoError(t, err)
+
+	// Create test database
+	dbPath := filepath.Join(tempDir, "cpp_test.db")
+	database, err := db.NewDatabase("sqlite3", dbPath)
+	require.NoError(t, err)
+	defer database.Close()
+
+	// Run migrations using the database's migration system
+	err = database.RunMigrations()
+	require.NoError(t, err)
+
+	syftScanner := scanner.NewSyftScanner(
+		cfg.Scanner.SyftPath,
+		cfg.Scanner.TempDir,
+		cfg.Scanner.CacheDir,
+		cfg.Scanner.TimeoutSeconds,
+	)
+
+	grypeScanner := scanner.NewGrypeScanner(
+		cfg.Scanner.GrypePath,
+		cfg.Scanner.TempDir,
+		cfg.Scanner.CacheDir,
+		cfg.Scanner.TimeoutSeconds,
+	)
+
+	ctx := context.Background()
+
+	// Test SBOM generation for C++ project
+	t.Run("GeneratesSBOMForCppProject", func(t *testing.T) {
+		sbom, err := syftScanner.GenerateSBOM(ctx, absTestDir, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, sbom)
+		assert.Contains(t, sbom.RepoName, "Dependency Bot") // Actual repo name from git
+		assert.Equal(t, "test-projects/cpp-app", sbom.ModulePath)
+		assert.NotEmpty(t, sbom.RawSBOM)
+
+		// Parse components from SBOM
+		components, err := syftScanner.ParseSBOMToComponents(sbom)
+		require.NoError(t, err)
+		assert.NotEmpty(t, components)
+
+		// Verify C++ components are detected
+		expectedComponents := map[string]bool{
+			"boost":         false,
+			"openssl":       false,
+			"libcurl":       false,
+			"zlib":          false,
+			"nlohmann_json": false,
+			"spdlog":        false,
+			"fmt":           false,
+			"gtest":         false,
+		}
+
+		for _, comp := range components {
+			if _, exists := expectedComponents[comp.Name]; exists {
+				expectedComponents[comp.Name] = true
+				assert.Equal(t, "conan", comp.Type, "Expected component type to be 'conan' for %s", comp.Name)
+				assert.Equal(t, "c++", comp.Language, "Expected language to be 'c++' for %s", comp.Name)
+				assert.NotEmpty(t, comp.Version, "Expected version to be set for %s", comp.Name)
+				assert.NotEmpty(t, comp.PURL, "Expected PURL to be set for %s", comp.Name)
+			}
+		}
+
+		// Verify all expected components were found
+		for name, found := range expectedComponents {
+			assert.True(t, found, "Expected to find C++ component: %s", name)
+		}
+
+		t.Logf("Found %d C++ components", len(components))
+	})
+
+	// Test vulnerability scanning for C++ project
+	t.Run("ScansVulnerabilitiesForCppProject", func(t *testing.T) {
+		vulns, err := grypeScanner.ScanDirectory(ctx, absTestDir, nil)
+		require.NoError(t, err)
+		assert.NotEmpty(t, vulns, "Expected to find vulnerabilities in C++ project")
+
+		// Check for known vulnerable components
+		hasOpenSSLVuln := false
+		hasZlibVuln := false
+		hasCurlVuln := false
+
+		for _, vuln := range vulns {
+			if strings.Contains(strings.ToLower(vuln.VulnID), "openssl") ||
+				strings.Contains(strings.ToLower(vuln.Description), "openssl") {
+				hasOpenSSLVuln = true
+			}
+			if strings.Contains(strings.ToLower(vuln.VulnID), "zlib") ||
+				strings.Contains(strings.ToLower(vuln.Description), "zlib") {
+				hasZlibVuln = true
+			}
+			if strings.Contains(strings.ToLower(vuln.VulnID), "curl") ||
+				strings.Contains(strings.ToLower(vuln.Description), "curl") {
+				hasCurlVuln = true
+			}
+
+			// Verify vulnerability structure
+			assert.NotEmpty(t, vuln.VulnID, "Vulnerability ID should not be empty")
+			assert.NotEmpty(t, vuln.Severity, "Severity should not be empty")
+			assert.NotZero(t, vuln.CVSS3Score, "CVSS3 score should be set")
+		}
+
+		t.Logf("Found %d vulnerabilities", len(vulns))
+		t.Logf("OpenSSL vulnerabilities found: %v", hasOpenSSLVuln)
+		t.Logf("Zlib vulnerabilities found: %v", hasZlibVuln)
+		t.Logf("Curl vulnerabilities found: %v", hasCurlVuln)
+
+		// We expect to find vulnerabilities in these commonly vulnerable libraries
+		assert.True(t, hasOpenSSLVuln || hasZlibVuln, "Expected to find vulnerabilities in OpenSSL or zlib")
+	})
+
+	// Test end-to-end C++ project scanning
+	t.Run("EndToEndCppProjectScan", func(t *testing.T) {
+		// Generate SBOM
+		sbom, err := syftScanner.GenerateSBOM(ctx, absTestDir, nil)
+		require.NoError(t, err)
+
+		// Save SBOM to database
+		err = database.CreateSBOM(sbom)
+		require.NoError(t, err)
+		assert.NotZero(t, sbom.ID)
+
+		// Parse and save components
+		components, err := syftScanner.ParseSBOMToComponents(sbom)
+		require.NoError(t, err)
+
+		for _, comp := range components {
+			err = database.CreateComponent(comp)
+			require.NoError(t, err)
+			assert.NotZero(t, comp.ID)
+		}
+
+		// Scan vulnerabilities
+		vulns, err := grypeScanner.ScanDirectory(ctx, absTestDir, nil)
+		require.NoError(t, err)
+
+		// Save vulnerabilities (simplified - link to first component)
+		if len(components) > 0 && len(vulns) > 0 {
+			for i, vuln := range vulns {
+				if i >= 5 { // Limit to first 5 vulnerabilities for test
+					break
+				}
+				vuln.ComponentID = components[0].ID
+				err = database.CreateVulnerability(vuln)
+				require.NoError(t, err)
+				assert.NotZero(t, vuln.ID)
+			}
+		}
+
+		// Verify data in database
+		savedSBOMs, err := database.GetAllSBOMs(10)
+		require.NoError(t, err)
+
+		found := false
+		for _, savedSBOM := range savedSBOMs {
+			if strings.Contains(savedSBOM.RepoName, "Dependency Bot") && savedSBOM.ModulePath == "test-projects/cpp-app" {
+				found = true
+				assert.Equal(t, "test-projects/cpp-app", savedSBOM.ModulePath)
+				assert.NotZero(t, savedSBOM.ComponentCount)
+				break
+			}
+		}
+		assert.True(t, found, "C++ project SBOM should be saved in database")
+
+		t.Logf("Successfully completed end-to-end C++ project scan")
 	})
 }
