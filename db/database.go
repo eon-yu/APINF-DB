@@ -5,6 +5,8 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"oss-compliance-scanner/models"
@@ -14,6 +16,30 @@ import (
 
 //go:embed schema.sql
 var schemaFS embed.FS
+
+// resolveMigrationsPath determines the correct path to migrations directory
+func resolveMigrationsPath() string {
+	// Check if migrations directory exists in current directory (when running from db package)
+	if _, err := os.Stat("migrations"); err == nil {
+		return "migrations"
+	}
+
+	// Check if db/migrations exists (when running from project root)
+	if _, err := os.Stat("db/migrations"); err == nil {
+		return "db/migrations"
+	}
+
+	// Fallback: try to find it relative to the current file
+	if workDir, err := os.Getwd(); err == nil {
+		// If we're in the db directory, use relative path
+		if filepath.Base(workDir) == "db" {
+			return "migrations"
+		}
+	}
+
+	// Default fallback
+	return "db/migrations"
+}
 
 // Database represents the database connection and operations
 type Database struct {
@@ -39,8 +65,8 @@ func NewDatabase(driverName, dataSourceName string) (*Database, error) {
 	conn.SetMaxIdleConns(10)
 	conn.SetConnMaxLifetime(5 * time.Minute)
 
-	// Initialize migration manager
-	migrationsDir := "db/migrations"
+	// Initialize migration manager with dynamic path resolution
+	migrationsDir := resolveMigrationsPath()
 	migrationManager := NewMigrationManager(conn, migrationsDir)
 
 	db := &Database{
@@ -125,7 +151,7 @@ func (db *Database) CreateSBOM(sbom *models.SBOM) error {
 // GetSBOM retrieves an SBOM by ID
 func (db *Database) GetSBOM(id int) (*models.SBOM, error) {
 	query := `
-		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom, 
+		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
 		       component_count, created_at, updated_at
 		FROM sboms WHERE id = ?
 	`
@@ -150,9 +176,9 @@ func (db *Database) GetSBOM(id int) (*models.SBOM, error) {
 // GetLatestSBOM retrieves the latest SBOM for a repo/module
 func (db *Database) GetLatestSBOM(repoName, modulePath string) (*models.SBOM, error) {
 	query := `
-		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom, 
+		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
 		       component_count, created_at, updated_at
-		FROM sboms 
+		FROM sboms
 		WHERE repo_name = ? AND module_path = ?
 		ORDER BY scan_date DESC
 		LIMIT 1
@@ -178,9 +204,9 @@ func (db *Database) GetLatestSBOM(repoName, modulePath string) (*models.SBOM, er
 // GetAllSBOMs retrieves all SBOMs with limit
 func (db *Database) GetAllSBOMs(limit int) ([]*models.SBOM, error) {
 	query := `
-		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom, 
+		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
 		       component_count, created_at, updated_at
-		FROM sboms 
+		FROM sboms
 		ORDER BY scan_date DESC
 		LIMIT ?
 	`
@@ -231,7 +257,7 @@ func (db *Database) CreateComponent(component *models.Component) error {
 	}
 
 	query := `
-		INSERT INTO components (sbom_id, name, version, type, purl, cpe, language, 
+		INSERT INTO components (sbom_id, name, version, type, purl, cpe, language,
 		                       licenses_json, locations_json, metadata_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
@@ -337,7 +363,7 @@ func (db *Database) GetComponent(componentID int) (*models.Component, error) {
 // UpdateSBOMComponentCount updates the component_count field for an SBOM
 func (db *Database) UpdateSBOMComponentCount(sbomID int) error {
 	query := `
-		UPDATE sboms 
+		UPDATE sboms
 		SET component_count = (
 			SELECT COUNT(*) FROM components WHERE sbom_id = ?
 		),
@@ -364,7 +390,7 @@ func (db *Database) CreateVulnerability(vuln *models.Vulnerability) error {
 
 	query := `
 		INSERT INTO vulnerabilities (component_id, vuln_id, severity, cvss3_score, cvss2_score,
-		                           description, published_date, modified_date, urls_json, 
+		                           description, published_date, modified_date, urls_json,
 		                           fixes_json, metadata_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
@@ -388,9 +414,9 @@ func (db *Database) CreateVulnerability(vuln *models.Vulnerability) error {
 // GetVulnerabilitiesByComponent retrieves vulnerabilities for a specific component
 func (db *Database) GetVulnerabilitiesByComponent(componentID int) ([]*models.Vulnerability, error) {
 	query := `
-		SELECT id, component_id, vuln_id, severity, cvss2_score, cvss3_score, description, 
+		SELECT id, component_id, vuln_id, severity, cvss2_score, cvss3_score, description,
 		       urls_json, published_date, modified_date, fixes_json, metadata_json, created_at, updated_at
-		FROM vulnerabilities 
+		FROM vulnerabilities
 		WHERE component_id = ?
 		ORDER BY severity DESC, created_at DESC
 	`
@@ -432,8 +458,8 @@ func (db *Database) GetVulnerabilitiesByComponent(componentID int) ([]*models.Vu
 // GetVulnerabilitiesBySBOM retrieves vulnerabilities for a specific SBOM with component information
 func (db *Database) GetVulnerabilitiesBySBOM(sbomID int) ([]*models.Vulnerability, error) {
 	query := `
-		SELECT v.id, v.component_id, v.vuln_id, v.severity, v.cvss2_score, v.cvss3_score, 
-		       v.description, v.urls_json, v.published_date, v.modified_date, v.fixes_json, 
+		SELECT v.id, v.component_id, v.vuln_id, v.severity, v.cvss2_score, v.cvss3_score,
+		       v.description, v.urls_json, v.published_date, v.modified_date, v.fixes_json,
 		       v.metadata_json, v.created_at, v.updated_at,
 		       c.name as component_name, c.version as component_version, c.type as component_type
 		FROM vulnerabilities v
@@ -491,16 +517,16 @@ func (db *Database) GetVulnerabilitiesBySBOM(sbomID int) ([]*models.Vulnerabilit
 // GetAllVulnerabilities retrieves all vulnerabilities with component information
 func (db *Database) GetAllVulnerabilities(limit int) ([]*models.Vulnerability, error) {
 	query := `
-		SELECT v.id, v.component_id, v.vuln_id, v.severity, v.cvss2_score, v.cvss3_score, 
-		       v.description, v.urls_json, v.published_date, v.modified_date, v.fixes_json, 
+		SELECT v.id, v.component_id, v.vuln_id, v.severity, v.cvss2_score, v.cvss3_score,
+		       v.description, v.urls_json, v.published_date, v.modified_date, v.fixes_json,
 		       v.metadata_json, v.created_at, v.updated_at,
 		       c.name as component_name, c.version as component_version, c.type as component_type,
 		       s.repo_name, s.module_path
 		FROM vulnerabilities v
 		JOIN components c ON v.component_id = c.id
 		JOIN sboms s ON c.sbom_id = s.id
-		ORDER BY 
-			CASE v.severity 
+		ORDER BY
+			CASE v.severity
 				WHEN 'Critical' THEN 1
 				WHEN 'High' THEN 2
 				WHEN 'Medium' THEN 3
@@ -618,7 +644,7 @@ func (db *Database) GetActiveLicensePolicies() ([]*models.LicensePolicy, error) 
 // CreateVulnerabilityPolicy creates a new vulnerability policy
 func (db *Database) CreateVulnerabilityPolicy(policy *models.VulnerabilityPolicy) error {
 	query := `
-		INSERT INTO vulnerability_policies (min_severity_level, max_cvss_score, action, 
+		INSERT INTO vulnerability_policies (min_severity_level, max_cvss_score, action,
 		                                  ignore_fix_available, grace_period_days, is_active)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`

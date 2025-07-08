@@ -563,6 +563,7 @@ func TestValidateTenant(t *testing.T) {
 
 	// Valid tenant
 	validTenant := &Tenant{
+		ID:     "valid-tenant-123",
 		Name:   "Valid Tenant",
 		Domain: "valid.com",
 	}

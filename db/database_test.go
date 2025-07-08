@@ -475,7 +475,7 @@ func TestDatabase_CreateLicensePolicy(t *testing.T) {
 	defer cleanup()
 
 	policy := &models.LicensePolicy{
-		LicenseName: "GPL-3.0",
+		LicenseName: "GPL-3.0-test-create",
 		Action:      "block",
 		IsActive:    true,
 	}
@@ -489,29 +489,43 @@ func TestDatabase_GetActiveLicensePolicies(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
+	// Get initial count of policies
+	initialPolicies, err := db.GetActiveLicensePolicies()
+	require.NoError(t, err)
+	initialCount := len(initialPolicies)
+
 	// Create active policy
 	activePolicy := &models.LicensePolicy{
-		LicenseName: "GPL-3.0",
+		LicenseName: "GPL-3.0-test-active",
 		Action:      "block",
 		IsActive:    true,
 	}
-	err := db.CreateLicensePolicy(activePolicy)
+	err = db.CreateLicensePolicy(activePolicy)
 	require.NoError(t, err)
 
 	// Create inactive policy
 	inactivePolicy := &models.LicensePolicy{
-		LicenseName: "MIT",
+		LicenseName: "MIT-test-inactive",
 		Action:      "allow",
 		IsActive:    false,
 	}
 	err = db.CreateLicensePolicy(inactivePolicy)
 	require.NoError(t, err)
 
-	// Get active policies
+	// Get active policies - should have initial + active policy we created
 	policies, err := db.GetActiveLicensePolicies()
 	assert.NoError(t, err)
-	assert.Len(t, policies, 1)
-	assert.Equal(t, "GPL-3.0", policies[0].LicenseName)
+	assert.Equal(t, initialCount+1, len(policies))
+
+	// Find our created policy in the list
+	found := false
+	for _, policy := range policies {
+		if policy.LicenseName == "GPL-3.0-test-active" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should find our created policy in the active policies list")
 }
 
 func TestDatabase_CreateVulnerabilityPolicy(t *testing.T) {
@@ -533,28 +547,43 @@ func TestDatabase_DeleteLicensePolicy(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
+	// Get initial count of policies
+	initialPolicies, err := db.GetActiveLicensePolicies()
+	require.NoError(t, err)
+	initialCount := len(initialPolicies)
+
 	// Create policy
 	policy := &models.LicensePolicy{
-		LicenseName: "GPL-3.0",
+		LicenseName: "GPL-3.0-test-delete",
 		Action:      "block",
 		IsActive:    true,
 	}
-	err := db.CreateLicensePolicy(policy)
+	err = db.CreateLicensePolicy(policy)
 	require.NoError(t, err)
+
+	// Verify policy was created
+	policiesAfterCreate, err := db.GetActiveLicensePolicies()
+	require.NoError(t, err)
+	assert.Equal(t, initialCount+1, len(policiesAfterCreate))
 
 	// Delete policy
 	err = db.DeleteLicensePolicy(policy.ID)
 	assert.NoError(t, err)
 
-	// Verify deletion - should not be in active policies
-	policies, err := db.GetActiveLicensePolicies()
+	// Verify deletion - should be back to initial count
+	policiesAfterDelete, err := db.GetActiveLicensePolicies()
 	assert.NoError(t, err)
-	assert.Empty(t, policies)
+	assert.Equal(t, initialCount, len(policiesAfterDelete))
 }
 
 func TestDatabase_DeleteVulnerabilityPolicy(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
+
+	// Get initial count of policies
+	initialPolicies, err := db.GetActiveVulnerabilityPolicies()
+	require.NoError(t, err)
+	initialCount := len(initialPolicies)
 
 	// Create policy
 	policy := &models.VulnerabilityPolicy{
@@ -562,17 +591,22 @@ func TestDatabase_DeleteVulnerabilityPolicy(t *testing.T) {
 		Action:           "fail",
 		IsActive:         true,
 	}
-	err := db.CreateVulnerabilityPolicy(policy)
+	err = db.CreateVulnerabilityPolicy(policy)
 	require.NoError(t, err)
+
+	// Verify policy was created
+	policiesAfterCreate, err := db.GetActiveVulnerabilityPolicies()
+	require.NoError(t, err)
+	assert.Equal(t, initialCount+1, len(policiesAfterCreate))
 
 	// Delete policy
 	err = db.DeleteVulnerabilityPolicy(policy.ID)
 	assert.NoError(t, err)
 
-	// Verify deletion
-	policies, err := db.GetActiveVulnerabilityPolicies()
+	// Verify deletion - should be back to initial count
+	policiesAfterDelete, err := db.GetActiveVulnerabilityPolicies()
 	assert.NoError(t, err)
-	assert.Empty(t, policies)
+	assert.Equal(t, initialCount, len(policiesAfterDelete))
 }
 
 // ScanResult Tests

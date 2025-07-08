@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"time"
@@ -118,6 +119,11 @@ func (ds *DashboardServer) Start() error {
 // Stop gracefully stops the web server
 func (ds *DashboardServer) Stop() error {
 	return ds.app.Shutdown()
+}
+
+// Test sends a test request to the server (for testing purposes)
+func (ds *DashboardServer) Test(req *http.Request) (*http.Response, error) {
+	return ds.app.Test(req)
 }
 
 // Web page handlers

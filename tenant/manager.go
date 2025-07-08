@@ -1,6 +1,7 @@
 package tenant
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -486,13 +487,19 @@ func isValidTenantID(id string) bool {
 
 // JSON marshaling helpers
 func marshalJSON(v interface{}) (string, error) {
-	// Implement JSON marshaling
-	// This is a placeholder - use json.Marshal in real implementation
-	return "{}", nil
+	if v == nil {
+		return "{}", nil
+	}
+	bytes, err := json.Marshal(v)
+	if err != nil {
+		return "{}", err
+	}
+	return string(bytes), nil
 }
 
 func unmarshalJSON(data string, v interface{}) error {
-	// Implement JSON unmarshaling
-	// This is a placeholder - use json.Unmarshal in real implementation
-	return nil
+	if data == "" || data == "{}" {
+		return nil
+	}
+	return json.Unmarshal([]byte(data), v)
 }
