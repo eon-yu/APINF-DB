@@ -533,7 +533,7 @@ func (pe *PolicyEngine) evaluateCustomRules(sbom *models.SBOM, components []*mod
 			for _, vuln := range componentVulns {
 				vulnViolations, err := pe.ruleEngine.EvaluateVulnerability(vuln, component)
 				if err != nil {
-					return nil, fmt.Errorf("failed to evaluate vulnerability rules for %s: %w", vuln.ID, err)
+					return nil, fmt.Errorf("failed to evaluate vulnerability rules for %d: %w", vuln.ID, err)
 				}
 				for _, violation := range vulnViolations {
 					violation.SBOMID = sbom.ID

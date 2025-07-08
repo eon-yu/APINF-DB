@@ -111,7 +111,7 @@ func (tm *TenantManager) CreateTenant(tenant *Tenant) error {
 	settingsJSON, _ := marshalJSON(tenant.Settings)
 	metadataJSON, _ := marshalJSON(tenant.Metadata)
 
-	_, err := tm.database.conn.Exec(query, tenant.ID, tenant.Name, tenant.Description,
+	_, err := tm.database.Exec(query, tenant.ID, tenant.Name, tenant.Description,
 		tenant.Domain, settingsJSON, tenant.CreatedAt, tenant.UpdatedAt,
 		tenant.IsActive, metadataJSON)
 

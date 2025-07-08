@@ -802,3 +802,20 @@ func (db *Database) DeleteVulnerabilityPolicy(id int) error {
 
 	return nil
 }
+
+// Generic database methods for tenant manager compatibility
+
+// Query executes a query that returns rows
+func (db *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return db.conn.Query(query, args...)
+}
+
+// QueryRow executes a query that is expected to return at most one row
+func (db *Database) QueryRow(query string, args ...interface{}) *sql.Row {
+	return db.conn.QueryRow(query, args...)
+}
+
+// Exec executes a query without returning any rows
+func (db *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
+	return db.conn.Exec(query, args...)
+}
