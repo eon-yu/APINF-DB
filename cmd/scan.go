@@ -302,17 +302,19 @@ func autoDiscoverTargets(repoPath string) []string {
 		"Cargo.toml",       // Rust
 		"composer.json",    // PHP
 		"Gemfile",          // Ruby
-		"CMakeLists.txt",   // C/C++ CMake
-		"Makefile",         // C/C++ Make
-		"conanfile.txt",    // C/C++ Conan
-		"conanfile.py",     // C/C++ Conan
-		"vcpkg.json",       // C/C++ vcpkg
-		"BUILD",            // C/C++ Bazel
-		"BUILD.bazel",      // C/C++ Bazel
-		"meson.build",      // C/C++ Meson
-		"configure.ac",     // C/C++ Autotools
-		"configure.in",     // C/C++ Autotools
-		"SConstruct",       // C/C++ SCons
+		// Modern C++ package managers
+		"conanfile.txt", // C++ Conan
+		"conanfile.py",  // C++ Conan
+		"vcpkg.json",    // C++ vcpkg
+		// Build systems (could be C or C++)
+		"CMakeLists.txt", // CMake (C/C++)
+		"Makefile",       // Make (C/C++)
+		"BUILD",          // Bazel (C/C++)
+		"BUILD.bazel",    // Bazel (C/C++)
+		"meson.build",    // Meson (C/C++)
+		"configure.ac",   // Autotools (C/C++)
+		"configure.in",   // Autotools (C/C++)
+		"SConstruct",     // SCons (C/C++)
 	}
 
 	// Define maximum depth to prevent scanning too deep

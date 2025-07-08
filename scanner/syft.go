@@ -233,6 +233,10 @@ func (s *SyftScanner) ScanDirectory(ctx context.Context, dirPath string) ([]*mod
 		"mix.exs":          "elixir",
 		"packages.config":  "nuget",
 		"*.csproj":         "dotnet",
+		// C++ package managers (modern C++)
+		"conanfile.txt": "conan",
+		"conanfile.py":  "conan",
+		"vcpkg.json":    "vcpkg",
 	}
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
@@ -280,6 +284,31 @@ func (s *SyftScanner) ScanDirectory(ctx context.Context, dirPath string) ([]*mod
 				sboms = append(sboms, sbom)
 				return filepath.SkipDir // Don't scan subdirectories of this module
 			}
+		}
+
+		// Check for C/C++ build files (additional logic for language detection)
+		moduleDir := filepath.Dir(path)
+		if ecosystem := DetermineEcosystemFromBuildFiles(moduleDir); ecosystem != "" {
+			// Check if we already processed this directory
+			for _, existingSbom := range sboms {
+				if existingSbom.ModulePath == moduleDir {
+					return nil // Already processed
+				}
+			}
+
+			options := DefaultScanOptions()
+			if catalogers := getCatalogersForEcosystem(ecosystem); len(catalogers) > 0 {
+				options.Catalogers = catalogers
+			}
+
+			sbom, err := s.GenerateSBOM(ctx, moduleDir, options)
+			if err != nil {
+				fmt.Printf("Warning: Failed to generate SBOM for C/C++ module %s: %v\n", moduleDir, err)
+				return nil
+			}
+
+			sboms = append(sboms, sbom)
+			return filepath.SkipDir
 		}
 
 		return nil
@@ -399,7 +428,101 @@ func getCatalogersForEcosystem(ecosystem string) []string {
 		"elixir": {"elixir-mix"},
 		"nuget":  {"dotnet-deps"},
 		"dotnet": {"dotnet-deps"},
+		// C++ package managers (modern C++)
+		"conan":     {"conan-lock", "conan"},
+		"vcpkg":     {"vcpkg"},
+		"cmake-cpp": {"cmake"},
+		"bazel-cpp": {"c-cataloger"},
+		"meson-cpp": {"c-cataloger"},
+		// C language build systems (traditional C)
+		"make-c":      {"c-cataloger"},
+		"autotools-c": {"c-cataloger"},
+		"scons-c":     {"c-cataloger"},
 	}
 
 	return catalogers[ecosystem]
+}
+
+// DetectLanguageFromDirectory analyzes directory contents to detect C vs C++
+func DetectLanguageFromDirectory(dirPath string) string {
+	cppExtensions := []string{".cpp", ".cxx", ".cc", ".hpp", ".hxx", ".hh"}
+	cExtensions := []string{".c", ".h"}
+
+	var cppFiles, cFiles int
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+		for _, cppExt := range cppExtensions {
+			if ext == cppExt {
+				cppFiles++
+				return nil
+			}
+		}
+		for _, cExt := range cExtensions {
+			if ext == cExt {
+				cFiles++
+				return nil
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "unknown"
+	}
+
+	// If we have C++ files, it's C++
+	if cppFiles > 0 {
+		return "cpp"
+	}
+
+	// If we only have C files, it's C
+	if cFiles > 0 {
+		return "c"
+	}
+
+	return "unknown"
+}
+
+// DetermineEcosystemFromBuildFiles determines ecosystem based on build files and source code
+func DetermineEcosystemFromBuildFiles(dirPath string) string {
+	buildFiles := map[string]string{
+		// C++ specific (modern package managers)
+		"conanfile.txt": "conan",
+		"conanfile.py":  "conan",
+		"vcpkg.json":    "vcpkg",
+		// Build systems that could be C or C++
+		"CMakeLists.txt": "cmake",
+		"Makefile":       "make",
+		"BUILD":          "bazel",
+		"BUILD.bazel":    "bazel",
+		"meson.build":    "meson",
+		"configure.ac":   "autotools",
+		"configure.in":   "autotools",
+		"SConstruct":     "scons",
+	}
+
+	for file, ecosystem := range buildFiles {
+		if _, err := os.Stat(filepath.Join(dirPath, file)); err == nil {
+			// For build systems that could be C or C++, detect language
+			if ecosystem == "cmake" || ecosystem == "make" || ecosystem == "bazel" ||
+				ecosystem == "meson" || ecosystem == "autotools" || ecosystem == "scons" {
+				lang := DetectLanguageFromDirectory(dirPath)
+				if lang == "cpp" {
+					return ecosystem + "-cpp"
+				} else if lang == "c" {
+					return ecosystem + "-c"
+				}
+				// Default to C++ for ambiguous cases with modern build systems
+				return ecosystem + "-cpp"
+			}
+			return ecosystem
+		}
+	}
+
+	return ""
 }

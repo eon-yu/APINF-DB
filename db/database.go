@@ -845,3 +845,152 @@ func (db *Database) QueryRow(query string, args ...interface{}) *sql.Row {
 func (db *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
 	return db.conn.Exec(query, args...)
 }
+
+// DeleteSBOM deletes an SBOM and all its related data (components, vulnerabilities)
+func (db *Database) DeleteSBOM(sbomID int) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete vulnerabilities for all components of this SBOM
+	_, err = tx.Exec(`
+		DELETE FROM vulnerabilities 
+		WHERE component_id IN (
+			SELECT id FROM components WHERE sbom_id = ?
+		)
+	`, sbomID)
+	if err != nil {
+		return fmt.Errorf("failed to delete vulnerabilities: %w", err)
+	}
+
+	// Delete components
+	_, err = tx.Exec("DELETE FROM components WHERE sbom_id = ?", sbomID)
+	if err != nil {
+		return fmt.Errorf("failed to delete components: %w", err)
+	}
+
+	// Delete SBOM
+	_, err = tx.Exec("DELETE FROM sboms WHERE id = ?", sbomID)
+	if err != nil {
+		return fmt.Errorf("failed to delete SBOM: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// DeleteSBOMs deletes multiple SBOMs and all their related data
+func (db *Database) DeleteSBOMs(sbomIDs []int) error {
+	if len(sbomIDs) == 0 {
+		return nil
+	}
+
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Create placeholder string for IN clause
+	placeholders := ""
+	args := make([]interface{}, len(sbomIDs))
+	for i, id := range sbomIDs {
+		if i > 0 {
+			placeholders += ","
+		}
+		placeholders += "?"
+		args[i] = id
+	}
+
+	// Delete vulnerabilities for all components of these SBOMs
+	vulnQuery := fmt.Sprintf(`
+		DELETE FROM vulnerabilities 
+		WHERE component_id IN (
+			SELECT id FROM components WHERE sbom_id IN (%s)
+		)
+	`, placeholders)
+	_, err = tx.Exec(vulnQuery, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete vulnerabilities: %w", err)
+	}
+
+	// Delete components
+	compQuery := fmt.Sprintf("DELETE FROM components WHERE sbom_id IN (%s)", placeholders)
+	_, err = tx.Exec(compQuery, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete components: %w", err)
+	}
+
+	// Delete SBOMs
+	sbomQuery := fmt.Sprintf("DELETE FROM sboms WHERE id IN (%s)", placeholders)
+	_, err = tx.Exec(sbomQuery, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete SBOMs: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// DeleteRepository deletes all SBOMs and related data for a repository
+func (db *Database) DeleteRepository(repoName string) error {
+	// First, get all SBOM IDs for this repository
+	rows, err := db.conn.Query("SELECT id FROM sboms WHERE repo_name = ?", repoName)
+	if err != nil {
+		return fmt.Errorf("failed to get SBOM IDs for repository: %w", err)
+	}
+	defer rows.Close()
+
+	var sbomIDs []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("failed to scan SBOM ID: %w", err)
+		}
+		sbomIDs = append(sbomIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error reading SBOM IDs: %w", err)
+	}
+
+	// Use existing DeleteSBOMs method to delete all SBOMs for this repository
+	return db.DeleteSBOMs(sbomIDs)
+}
+
+// GetSBOMsByRepository returns all SBOMs for a given repository
+func (db *Database) GetSBOMsByRepository(repoName string) ([]*models.SBOM, error) {
+	query := `
+		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
+		       component_count, created_at, updated_at
+		FROM sboms
+		WHERE repo_name = ?
+		ORDER BY module_path, scan_date DESC
+	`
+
+	rows, err := db.conn.Query(query, repoName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query SBOMs: %w", err)
+	}
+	defer rows.Close()
+
+	var sboms []*models.SBOM
+	for rows.Next() {
+		sbom := &models.SBOM{}
+		err := rows.Scan(
+			&sbom.ID, &sbom.RepoName, &sbom.ModulePath, &sbom.ScanDate,
+			&sbom.SyftVersion, &sbom.RawSBOM, &sbom.ComponentCount,
+			&sbom.CreatedAt, &sbom.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan SBOM: %w", err)
+		}
+		sboms = append(sboms, sbom)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading SBOMs: %w", err)
+	}
+
+	return sboms, nil
+}

@@ -29,11 +29,22 @@ type DashboardServer struct {
 // RepositoryInfo holds information about a repository and its modules
 type RepositoryInfo struct {
 	Name                 string         `json:"name"`
-	Modules              []*models.SBOM `json:"modules"`
-	TotalComponents      int            `json:"total_components"`
+	Modules              []*models.SBOM `json:"modules"`          // All SBOM executions
+	UniqueModules        []ModuleInfo   `json:"unique_modules"`   // Unique modules with latest info
+	ModuleCount          int            `json:"module_count"`     // Count of unique modules
+	TotalComponents      int            `json:"total_components"` // From latest SBOMs only
 	TotalVulnerabilities int            `json:"total_vulnerabilities"`
 	LastScanDate         string         `json:"last_scan_date"`
 	RiskLevel            string         `json:"risk_level"`
+}
+
+// ModuleInfo represents information about a unique module
+type ModuleInfo struct {
+	ModulePath     string         `json:"module_path"`
+	LatestSBOM     *models.SBOM   `json:"latest_sbom"`
+	ComponentCount int            `json:"component_count"`
+	VulnCount      int            `json:"vuln_count"`
+	AllSBOMs       []*models.SBOM `json:"all_sboms"` // All SBOM executions for this module
 }
 
 // NewDashboardServer creates a new dashboard server instance
@@ -111,9 +122,15 @@ func (ds *DashboardServer) setupRoutes() {
 	api.Post("/scan/start", ds.handleAPIStartScan)
 	api.Get("/scan/status/:id", ds.handleAPIScanStatus)
 	api.Post("/sboms/:id/rescan", ds.handleAPIRescanSBOM)
+	api.Post("/repositories/:name/rescan", ds.handleAPIRescanRepository)
 	api.Get("/sboms/:id/download", ds.handleAPISBOMDownload)
 	api.Get("/components/:id", ds.handleAPIComponentDetail)
 	api.Get("/sboms/:id/licenses", ds.handleAPILicensesBySBOM)
+
+	// Delete API
+	api.Delete("/sboms/:id", ds.handleAPIDeleteSBOM)
+	api.Delete("/sboms", ds.handleAPIDeleteSBOMs)
+	api.Delete("/repositories/:name", ds.handleAPIDeleteRepository)
 
 	// Health check API
 	api.Get("/health/db", ds.handleAPIHealthDB)
@@ -169,6 +186,8 @@ func (ds *DashboardServer) handleSBOMs(c *fiber.Ctx) error {
 			repositoryGroups[sbom.RepoName] = &RepositoryInfo{
 				Name:                 sbom.RepoName,
 				Modules:              []*models.SBOM{},
+				UniqueModules:        []ModuleInfo{},
+				ModuleCount:          0,
 				TotalComponents:      0,
 				TotalVulnerabilities: 0,
 				LastScanDate:         sbom.ScanDate.Format("2006-01-02 15:04"),
@@ -178,7 +197,6 @@ func (ds *DashboardServer) handleSBOMs(c *fiber.Ctx) error {
 
 		repo := repositoryGroups[sbom.RepoName]
 		repo.Modules = append(repo.Modules, sbom)
-		repo.TotalComponents += sbom.ComponentCount
 
 		// Update last scan date if this SBOM is more recent
 		lastScanTime, err := time.Parse("2006-01-02 15:04", repo.LastScanDate)
@@ -187,14 +205,54 @@ func (ds *DashboardServer) handleSBOMs(c *fiber.Ctx) error {
 		}
 	}
 
+	// Process unique modules for each repository
+	for _, repo := range repositoryGroups {
+		moduleMap := make(map[string]*ModuleInfo)
+
+		// Group SBOMs by module path to find unique modules
+		for _, sbom := range repo.Modules {
+			if moduleInfo, exists := moduleMap[sbom.ModulePath]; !exists {
+				moduleMap[sbom.ModulePath] = &ModuleInfo{
+					ModulePath:     sbom.ModulePath,
+					LatestSBOM:     sbom,
+					ComponentCount: sbom.ComponentCount,
+					VulnCount:      0,
+					AllSBOMs:       []*models.SBOM{sbom},
+				}
+			} else {
+				// Add to all SBOMs list
+				moduleInfo.AllSBOMs = append(moduleInfo.AllSBOMs, sbom)
+				// Update latest SBOM if this one is more recent
+				if sbom.ScanDate.After(moduleInfo.LatestSBOM.ScanDate) {
+					moduleInfo.LatestSBOM = sbom
+					moduleInfo.ComponentCount = sbom.ComponentCount
+				}
+			}
+		}
+
+		// Convert map to slice and calculate totals from latest SBOMs only
+		repo.UniqueModules = make([]ModuleInfo, 0, len(moduleMap))
+		repo.TotalComponents = 0
+
+		for _, moduleInfo := range moduleMap {
+			repo.UniqueModules = append(repo.UniqueModules, *moduleInfo)
+			repo.TotalComponents += moduleInfo.ComponentCount
+		}
+
+		repo.ModuleCount = len(moduleMap)
+	}
+
 	// Calculate vulnerability counts and risk levels for each repository
 	for _, repo := range repositoryGroups {
 		criticalCount, highCount := 0, 0
 
-		for _, sbom := range repo.Modules {
-			// Get vulnerabilities for this SBOM
-			vulns, err := ds.database.GetVulnerabilitiesBySBOM(sbom.ID)
+		// Only count vulnerabilities from latest SBOMs of unique modules
+		for i := range repo.UniqueModules {
+			moduleInfo := &repo.UniqueModules[i]
+			// Get vulnerabilities for this module's latest SBOM
+			vulns, err := ds.database.GetVulnerabilitiesBySBOM(moduleInfo.LatestSBOM.ID)
 			if err == nil {
+				moduleInfo.VulnCount = len(vulns)
 				repo.TotalVulnerabilities += len(vulns)
 
 				for _, vuln := range vulns {
@@ -835,6 +893,79 @@ func (ds *DashboardServer) handleAPIRescanSBOM(c *fiber.Ctx) error {
 	})
 }
 
+// Repository rescan handler - handles single module vs multi-module scenarios
+func (ds *DashboardServer) handleAPIRescanRepository(c *fiber.Ctx) error {
+	repoName := c.Params("name")
+	if repoName == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Repository name is required"})
+	}
+
+	// Get all SBOMs for this repository
+	allSBOMs, err := ds.database.GetAllSBOMs(1000) // Get enough to find all for this repo
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to get SBOMs"})
+	}
+
+	// Filter SBOMs for this repository and find latest per module
+	moduleMap := make(map[string]*models.SBOM)
+	for _, sbom := range allSBOMs {
+		if sbom.RepoName != repoName {
+			continue
+		}
+
+		if existing, exists := moduleMap[sbom.ModulePath]; !exists || sbom.ScanDate.After(existing.ScanDate) {
+			moduleMap[sbom.ModulePath] = sbom
+		}
+	}
+
+	if len(moduleMap) == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "No SBOMs found for repository"})
+	}
+
+	// Determine scan strategy
+	moduleCount := len(moduleMap)
+	isSingleModule := moduleCount == 1
+
+	var scanIDs []string
+
+	// Create scan IDs and start scans for each unique module's latest SBOM
+	for modulePath, sbom := range moduleMap {
+		scanID := fmt.Sprintf("repo_rescan_%s_%s_%d", repoName, modulePath, time.Now().Unix())
+		scanIDs = append(scanIDs, scanID)
+
+		// Start background rescan process for this module
+		go func(id, repo, module string) {
+			ds.executeScan(id, "", repo, module, "both")
+		}(scanID, sbom.RepoName, sbom.ModulePath)
+	}
+
+	// Create response message based on module count
+	var message string
+	if isSingleModule {
+		message = fmt.Sprintf("\"%s\" 저장소의 모듈 재스캔이 시작되었습니다.", repoName)
+	} else {
+		message = fmt.Sprintf("\"%s\" 저장소의 %d개 모듈 재스캔이 시작되었습니다.", repoName, moduleCount)
+	}
+
+	return c.JSON(fiber.Map{
+		"scan_ids":     scanIDs,
+		"module_count": moduleCount,
+		"is_single":    isSingleModule,
+		"status":       "started",
+		"message":      message,
+		"modules":      getModulePathsFromMap(moduleMap),
+	})
+}
+
+// Helper function to extract module paths from map
+func getModulePathsFromMap(moduleMap map[string]*models.SBOM) []string {
+	var paths []string
+	for path := range moduleMap {
+		paths = append(paths, path)
+	}
+	return paths
+}
+
 // executeScan simulates the actual scan execution
 func (ds *DashboardServer) executeScan(scanID, repoPath, repoName, modulePath, scanType string) {
 	// This is a simplified simulation of the scan process
@@ -1090,4 +1221,109 @@ func (ds *DashboardServer) sendSlackMessage(slackNotifier *notifier.SlackNotifie
 	}
 
 	return slackNotifier.SendCustomMessage(messageText, message.Channel)
+}
+
+// Delete API handlers
+
+// handleAPIDeleteSBOM handles single SBOM deletion
+func (ds *DashboardServer) handleAPIDeleteSBOM(c *fiber.Ctx) error {
+	idParam := c.Params("id")
+	sbomID, err := strconv.Atoi(idParam)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid SBOM ID"})
+	}
+
+	// Check if SBOM exists
+	sbom, err := ds.database.GetSBOM(sbomID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "SBOM not found"})
+	}
+
+	// Delete SBOM
+	if err := ds.database.DeleteSBOM(sbomID); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to delete SBOM"})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": fmt.Sprintf("SBOM '%s/%s' deleted successfully", sbom.RepoName, sbom.ModulePath),
+	})
+}
+
+// handleAPIDeleteSBOMs handles multiple SBOM deletion
+func (ds *DashboardServer) handleAPIDeleteSBOMs(c *fiber.Ctx) error {
+	type DeleteSBOMsRequest struct {
+		SBOMIDs []int `json:"sbom_ids"`
+	}
+
+	var req DeleteSBOMsRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	if len(req.SBOMIDs) == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "No SBOM IDs provided"})
+	}
+
+	// Get SBOM info for response message
+	var sbomInfos []map[string]string
+	for _, id := range req.SBOMIDs {
+		sbom, err := ds.database.GetSBOM(id)
+		if err != nil {
+			// Skip if SBOM doesn't exist
+			continue
+		}
+		sbomInfos = append(sbomInfos, map[string]string{
+			"repo_name":   sbom.RepoName,
+			"module_path": sbom.ModulePath,
+		})
+	}
+
+	// Delete SBOMs
+	if err := ds.database.DeleteSBOMs(req.SBOMIDs); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to delete SBOMs"})
+	}
+
+	return c.JSON(fiber.Map{
+		"success":       true,
+		"message":       fmt.Sprintf("%d SBOM(s) deleted successfully", len(req.SBOMIDs)),
+		"deleted_count": len(req.SBOMIDs),
+		"deleted_sboms": sbomInfos,
+	})
+}
+
+// handleAPIDeleteRepository handles repository deletion
+func (ds *DashboardServer) handleAPIDeleteRepository(c *fiber.Ctx) error {
+	repoName := c.Params("name")
+	if repoName == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Repository name is required"})
+	}
+
+	// Get SBOMs for this repository for response message
+	sboms, err := ds.database.GetSBOMsByRepository(repoName)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to get repository SBOMs"})
+	}
+
+	if len(sboms) == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "Repository not found or no SBOMs exist"})
+	}
+
+	// Delete repository
+	if err := ds.database.DeleteRepository(repoName); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to delete repository"})
+	}
+
+	// Build response with deleted modules info
+	var modules []string
+	for _, sbom := range sboms {
+		modules = append(modules, sbom.ModulePath)
+	}
+
+	return c.JSON(fiber.Map{
+		"success":       true,
+		"message":       fmt.Sprintf("Repository '%s' and all %d SBOM(s) deleted successfully", repoName, len(sboms)),
+		"deleted_count": len(sboms),
+		"modules":       modules,
+	})
 }

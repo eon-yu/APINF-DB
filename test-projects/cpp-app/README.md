@@ -1,6 +1,23 @@
 # C++ OSS Compliance Test Project
 
-이 프로젝트는 OSS Compliance Scanner의 C/C++ 지원을 테스트하기 위한 샘플 프로젝트입니다.
+이 프로젝트는 OSS Compliance Scanner의 **현대적 C++** 지원을 테스트하기 위한 샘플 프로젝트입니다.
+
+## 🔍 C++ vs C 구분
+
+이 프로젝트는 **순수 C가 아닌 현대적 C++ 프로젝트**입니다:
+
+### ✅ Modern C++ 특징
+- **언어**: C++17 표준
+- **빌드 시스템**: CMake, Conan, vcpkg (현대적 도구)
+- **라이브러리**: C++ STL, Boost, 현대적 C++ 라이브러리
+- **파일 확장자**: `.cpp`, `.hpp` (C++ 전용)
+- **패키지 관리**: Conan, vcpkg (C++ 전용)
+
+### ❌ C와의 차이점
+- Make 같은 전통적 C 빌드 도구 **미사용**
+- json-c 같은 C 전용 라이브러리 **미사용**
+- `.c`, `.h` 확장자 **미사용**
+- 시스템 패키지 매니저만 의존 **안함**
 
 ## 프로젝트 구조
 
@@ -24,12 +41,21 @@ cpp-app/
 - **libcurl**: HTTP 클라이언트 라이브러리
 - **zlib**: 압축 라이브러리
 
-### 서드파티 라이브러리
-- **Boost**: C++ 유틸리티 라이브러리
-- **nlohmann/json**: JSON 파싱 라이브러리
-- **spdlog**: 로깅 라이브러리
-- **fmt**: 포맷팅 라이브러리
-- **gtest**: 단위 테스트 프레임워크
+### 현대적 C++ 라이브러리
+- **Boost**: C++ 유틸리티 라이브러리 (C++ 전용)
+- **nlohmann/json**: C++ JSON 라이브러리 (vs C의 json-c)
+- **spdlog**: C++ 로깅 라이브러리
+- **fmt**: C++ 포맷팅 라이브러리
+- **gtest**: C++ 단위 테스트 프레임워크
+
+### vs C 라이브러리 비교
+| C++ 라이브러리 | C 대응 라이브러리 |
+|---------------|-----------------|
+| nlohmann/json | json-c |
+| spdlog | syslog |
+| std::thread | pthread |
+| std::unique_ptr | malloc/free |
+| Boost | 시스템 C 라이브러리 |
 
 ## 지원하는 패키지 매니저
 

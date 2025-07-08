@@ -60,8 +60,8 @@
                                     {{$repoName}}
                                 </h5>
                                 <small class="text-muted">
-                                    {{len $repoInfo.Modules}}개 모듈 • 
-                                    총 {{$repoInfo.TotalComponents}}개 컴포넌트 • 
+                                    {{$repoInfo.ModuleCount}}개 모듈 • 
+                                    총 {{$repoInfo.TotalComponents}}개 컴포넌트 (최신) • 
                                     최근 스캔: {{$repoInfo.LastScanDate}}
                                 </small>
                             </div>
@@ -72,10 +72,18 @@
                                 {{if eq $repoInfo.RiskLevel "critical"}}매우 위험{{else if eq $repoInfo.RiskLevel "high"}}위험{{else if eq $repoInfo.RiskLevel "medium"}}보통{{else}}안전{{end}}
                             </span>
                             <!-- 전체 저장소 재스캔 버튼 -->
-                            <button class="btn btn-sm btn-outline-success" onclick="rescanRepository('{{$repoName}}')" 
-                                    title="{{$repoName}} 전체 재스캔">
+                            <button class="btn btn-sm btn-outline-success" 
+                                    onclick="rescanRepository('{{$repoName}}', {{$repoInfo.ModuleCount}})" 
+                                    title="{{$repoName}} {{if eq $repoInfo.ModuleCount 1}}모듈 재스캔{{else}}전체 모듈 재스캔{{end}}">
                                 <i class="bi bi-arrow-clockwise"></i>
-                                전체 재스캔
+                                {{if eq $repoInfo.ModuleCount 1}}재스캔{{else}}전체 재스캔{{end}}
+                            </button>
+                            <!-- 저장소 삭제 버튼 -->
+                            <button class="btn btn-sm btn-outline-danger" 
+                                    onclick="deleteRepository('{{$repoName}}', {{$repoInfo.ModuleCount}})" 
+                                    title="{{$repoName}} 저장소 전체 삭제">
+                                <i class="bi bi-trash"></i>
+                                저장소 삭제
                             </button>
                         </div>
                     </div>
@@ -84,27 +92,44 @@
                 <!-- 모듈 목록 -->
                 <div class="collapse show" id="repo-{{$repoName}}">
                     <div class="card-body">
-                        {{if eq (len $repoInfo.Modules) 1}}
+                        {{if eq $repoInfo.ModuleCount 1}}
                         <!-- 단일 모듈 -->
-                        {{range $module := $repoInfo.Modules}}
+                        {{range $moduleInfo := $repoInfo.UniqueModules}}
                         <div class="alert alert-light border d-flex justify-content-between align-items-center">
                             <div class="d-flex align-items-center">
                                 <i class="bi bi-folder text-warning me-3"></i>
                                 <div>
-                                    <strong>{{if eq $module.ModulePath "root"}}/ (루트 모듈){{else}}{{$module.ModulePath}}{{end}}</strong>
+                                    <strong>{{if eq $moduleInfo.ModulePath "root"}}/ (루트 모듈){{else}}{{$moduleInfo.ModulePath}}{{end}}</strong>
                                     <br>
                                     <small class="text-muted">
-                                                                                 {{$module.ComponentCount}}개 컴포넌트 • 
-                                         {{$module.ScanDate.Format "2006-01-02 15:04"}}
+                                        {{$moduleInfo.ComponentCount}}개 컴포넌트 • 
+                                        {{$moduleInfo.VulnCount}}개 취약점 • 
+                                        {{$moduleInfo.LatestSBOM.ScanDate.Format "2006-01-02 15:04"}} (최신)
+                                        {{if gt (len $moduleInfo.AllSBOMs) 1}}
+                                        • 총 {{len $moduleInfo.AllSBOMs}}회 스캔
+                                        {{end}}
                                     </small>
                                 </div>
                             </div>
                             <div class="btn-group" role="group">
-                                <a href="/sboms/{{$module.ID}}" class="btn btn-sm btn-primary">
+                                <a href="/sboms/{{$moduleInfo.LatestSBOM.ID}}" class="btn btn-sm btn-primary">
                                     <i class="bi bi-eye"></i>
-                                    상세보기
+                                    최신 보기
                                 </a>
-                                <button class="btn btn-sm btn-outline-success" onclick="rescanSBOM({{$module.ID}})">
+                                {{if gt (len $moduleInfo.AllSBOMs) 1}}
+                                <button class="btn btn-sm btn-outline-info dropdown-toggle" data-bs-toggle="dropdown">
+                                    <i class="bi bi-clock-history"></i>
+                                    이력 ({{len $moduleInfo.AllSBOMs}})
+                                </button>
+                                <ul class="dropdown-menu">
+                                    {{range $moduleInfo.AllSBOMs}}
+                                    <li><a class="dropdown-item" href="/sboms/{{.ID}}">
+                                        {{.ScanDate.Format "2006-01-02 15:04"}} ({{.ComponentCount}}개 컴포넌트)
+                                    </a></li>
+                                    {{end}}
+                                </ul>
+                                {{end}}
+                                <button class="btn btn-sm btn-outline-success" onclick="rescanSBOM({{$moduleInfo.LatestSBOM.ID}})">
                                     <i class="bi bi-arrow-clockwise"></i>
                                     재스캔
                                 </button>
@@ -118,49 +143,60 @@
                                 <thead class="table-light">
                                     <tr>
                                         <th>모듈 경로</th>
-                                        <th>컴포넌트</th>
+                                        <th>컴포넌트 (최신)</th>
                                         <th>취약점</th>
-                                        <th>위험도</th>
-                                        <th>스캔 날짜</th>
+                                        <th>스캔 이력</th>
+                                        <th>최근 스캔</th>
                                         <th>액션</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {{range $module := $repoInfo.Modules}}
+                                    {{range $moduleInfo := $repoInfo.UniqueModules}}
                                     <tr>
                                         <td>
                                             <div class="d-flex align-items-center">
                                                 <i class="bi bi-folder text-warning me-2"></i>
-                                                <code class="text-primary">{{if eq $module.ModulePath "root"}}/ (루트){{else}}{{$module.ModulePath}}{{end}}</code>
+                                                <code class="text-primary">{{if eq $moduleInfo.ModulePath "root"}}/ (루트){{else}}{{$moduleInfo.ModulePath}}{{end}}</code>
                                             </div>
                                         </td>
                                         <td>
-                                            <span class="badge bg-info">{{$module.ComponentCount}}</span>
+                                            <span class="badge bg-info">{{$moduleInfo.ComponentCount}}</span>
                                         </td>
                                         <td>
-                                            <div class="vulnerability-info" data-sbom-id="{{$module.ID}}">
-                                                <div class="spinner-border spinner-border-sm text-muted" role="status">
-                                                    <span class="visually-hidden">로딩 중...</span>
-                                                </div>
+                                            <span class="badge {{if eq $moduleInfo.VulnCount 0}}bg-success{{else if le $moduleInfo.VulnCount 2}}bg-warning{{else}}bg-danger{{end}} text-dark">
+                                                {{$moduleInfo.VulnCount}}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group">
+                                                <span class="badge bg-light text-dark">{{len $moduleInfo.AllSBOMs}}회</span>
+                                                {{if gt (len $moduleInfo.AllSBOMs) 1}}
+                                                <button class="btn btn-sm btn-outline-secondary dropdown-toggle dropdown-toggle-split" 
+                                                        data-bs-toggle="dropdown" title="스캔 이력 보기">
+                                                    <span class="visually-hidden">스캔 이력</span>
+                                                </button>
+                                                <ul class="dropdown-menu">
+                                                    {{range $moduleInfo.AllSBOMs}}
+                                                    <li><a class="dropdown-item" href="/sboms/{{.ID}}">
+                                                        <small>{{.ScanDate.Format "01-02 15:04"}} ({{.ComponentCount}}c)</small>
+                                                    </a></li>
+                                                    {{end}}
+                                                </ul>
+                                                {{end}}
                                             </div>
                                         </td>
                                         <td>
-                                            <div class="risk-level" data-sbom-id="{{$module.ID}}">
-                                                <span class="badge bg-light text-muted">계산 중...</span>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <small class="text-muted">{{$module.ScanDate.Format "2006-01-02 15:04"}}</small>
+                                            <small class="text-muted">{{$moduleInfo.LatestSBOM.ScanDate.Format "2006-01-02 15:04"}}</small>
                                         </td>
                                         <td>
                                             <div class="btn-group" role="group">
-                                                <a href="/sboms/{{$module.ID}}" class="btn btn-sm btn-outline-primary" 
-                                                   title="{{$module.ModulePath}} 상세보기">
+                                                <a href="/sboms/{{$moduleInfo.LatestSBOM.ID}}" class="btn btn-sm btn-outline-primary" 
+                                                   title="{{$moduleInfo.ModulePath}} 최신 보기">
                                                     <i class="bi bi-eye"></i>
                                                 </a>
                                                 <button class="btn btn-sm btn-outline-success" 
-                                                        onclick="rescanSBOM({{$module.ID}})"
-                                                        title="{{$module.ModulePath}} 재스캔">
+                                                        onclick="rescanSBOM({{$moduleInfo.LatestSBOM.ID}})"
+                                                        title="{{$moduleInfo.ModulePath}} 재스캔">
                                                     <i class="bi bi-arrow-clockwise"></i>
                                                 </button>
                                             </div>
@@ -195,11 +231,28 @@
 <!-- 평면 보기 (기존 스타일) -->
 <div id="flatView" class="flat-view" style="display: none;">
     <div class="card">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">SBOM 목록</h6>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-danger" 
+                            id="deleteSelectedBtn" 
+                            onclick="deleteSelectedSBOMs()" 
+                            style="display: none;">
+                        <i class="bi bi-trash"></i>
+                        선택 삭제 (<span id="selectedCount">0</span>)
+                    </button>
+                </div>
+            </div>
+        </div>
         <div class="card-body">
             <div class="table-responsive">
                 <table class="table table-hover" id="sbomsTable">
                     <thead class="table-light">
                         <tr>
+                            <th width="40">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                            </th>
                             <th>저장소</th>
                             <th>모듈 경로</th>
                             <th>스캔 날짜</th>
@@ -211,7 +264,10 @@
                     </thead>
                     <tbody id="sbomsTableBody">
                         {{range .SBOMs}}
-                        <tr data-repo="{{.RepoName}}" data-module="{{.ModulePath}}" class="sbom-row">
+                        <tr data-repo="{{.RepoName}}" data-module="{{.ModulePath}}" data-sbom-id="{{.ID}}" class="sbom-row">
+                            <td>
+                                <input type="checkbox" class="sbom-checkbox" value="{{.ID}}" onchange="updateSelectedCount()">
+                            </td>
                             <td>
                                 <div class="d-flex align-items-center">
                                     <i class="bi bi-git text-muted me-2"></i>
@@ -244,15 +300,28 @@
                             </td>
                             <td>
                                 <div class="btn-group" role="group">
-                                    <a href="/sboms/{{.ID}}" class="btn btn-sm btn-outline-primary">
+                                    <a href="/sboms/{{.ID}}" class="btn btn-sm btn-outline-primary" 
+                                       title="{{.RepoName}}/{{.ModulePath}} 상세보기">
                                         <i class="bi bi-eye"></i>
-                                        상세보기
                                     </a>
-                                    <button class="btn btn-sm btn-outline-success" onclick="rescanSBOM({{.ID}})">
+                                    <button class="btn btn-sm btn-outline-success" 
+                                            onclick="rescanSBOM({{.ID}})"
+                                            title="{{.RepoName}}/{{.ModulePath}} 재스캔">
                                         <i class="bi bi-arrow-clockwise"></i>
-                                        재스캔
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" 
+                                            onclick="deleteSBOM({{.ID}})"
+                                            title="{{.RepoName}}/{{.ModulePath}} 삭제">
+                                        <i class="bi bi-trash"></i>
                                     </button>
                                 </div>
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">
+                                <i class="bi bi-inbox display-4 d-block mb-3"></i>
+                                스캔된 SBOM이 없습니다.
                             </td>
                         </tr>
                         {{end}}
@@ -264,51 +333,94 @@
 </div>
 
 <!-- 새 스캔 모달 -->
-<div class="modal fade" id="newScanModal" tabindex="-1" aria-labelledby="newScanModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
+<div class="modal fade" id="newScanModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="newScanModalLabel">
-                    <i class="bi bi-plus-circle"></i>
+                <h5 class="modal-title">
+                    <i class="bi bi-search text-primary me-2"></i>
                     새 스캔 실행
                 </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="newScanForm">
-                    <div class="mb-3">
-                        <label for="repoPath" class="form-label">저장소 경로</label>
-                        <input type="text" class="form-control" id="repoPath" required
-                               placeholder="/path/to/repository">
-                        <div class="form-text">스캔할 저장소의 로컬 경로를 입력하세요</div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scanRepoPath" class="form-label">저장소 경로</label>
+                                <input type="text" class="form-control" id="scanRepoPath" 
+                                       placeholder="/path/to/repository" required>
+                                <div class="form-text">스캔할 저장소의 로컬 경로</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scanRepoName" class="form-label">저장소 이름</label>
+                                <input type="text" class="form-control" id="scanRepoName" 
+                                       placeholder="my-repository" required>
+                                <div class="form-text">저장소 식별용 이름</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label for="repoName" class="form-label">저장소 이름</label>
-                        <input type="text" class="form-control" id="repoName" required
-                               placeholder="my-project">
-                        <div class="form-text">저장소 식별을 위한 이름</div>
-                    </div>
-                    <div class="mb-3">
-                        <label for="modulePath" class="form-label">모듈 경로 (선택사항)</label>
-                        <input type="text" class="form-control" id="modulePath" 
-                               placeholder="." value=".">
-                        <div class="form-text">특정 모듈을 스캔하려면 경로를 입력 (기본값: 루트)</div>
-                    </div>
-                    <div class="mb-3">
-                        <label for="scanType" class="form-label">스캔 타입</label>
-                        <select class="form-select" id="scanType">
-                            <option value="both">전체 스캔 (SBOM + 취약점)</option>
-                            <option value="syft">SBOM만 생성</option>
-                            <option value="grype">취약점만 스캔</option>
-                        </select>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scanModulePath" class="form-label">모듈 경로</label>
+                                <input type="text" class="form-control" id="scanModulePath" 
+                                       placeholder="." value=".">
+                                <div class="form-text">스캔할 모듈의 상대 경로 (기본값: .)</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="scanType" class="form-label">스캔 타입</label>
+                                <select class="form-select" id="scanType">
+                                    <option value="full">전체 스캔 (SBOM + 취약점)</option>
+                                    <option value="sbom">SBOM만 생성</option>
+                                    <option value="vuln">취약점만 스캔</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
                 <button type="button" class="btn btn-primary" onclick="startNewScan()">
-                    <i class="bi bi-play"></i>
+                    <i class="bi bi-play-fill"></i>
                     스캔 시작
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 삭제 확인 모달 -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle text-warning me-2"></i>
+                    삭제 확인
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="deleteModalContent">
+                    <!-- 삭제 내용이 여기에 표시됩니다 -->
+                </div>
+                <div class="alert alert-warning mt-3">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>주의:</strong> 이 작업은 되돌릴 수 없습니다.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                    <i class="bi bi-trash"></i>
+                    삭제
                 </button>
             </div>
         </div>
@@ -361,148 +473,66 @@
 </style>
 
 <script>
-let currentView = 'repositories';
-let allRepositories = [];
-let allSBOMs = [];
-
-// 페이지 로드 시 초기화
-document.addEventListener('DOMContentLoaded', function() {
-    loadRepositoryData();
-    loadVulnerabilityData();
-});
-
-// 보기 방식 전환
-function toggleView(viewType) {
-    currentView = viewType;
+// 보기 전환
+function toggleView(view) {
+    const repoView = document.getElementById('repositoryView');
+    const flatView = document.getElementById('flatView');
+    const repoBtn = document.getElementById('repoViewBtn');
+    const flatBtn = document.getElementById('flatViewBtn');
     
-    // 버튼 상태 업데이트
-    document.getElementById('repoViewBtn').classList.toggle('active', viewType === 'repositories');
-    document.getElementById('repoViewBtn').classList.toggle('btn-primary', viewType === 'repositories');
-    document.getElementById('repoViewBtn').classList.toggle('btn-outline-primary', viewType !== 'repositories');
-    
-    document.getElementById('flatViewBtn').classList.toggle('active', viewType === 'flat');
-    document.getElementById('flatViewBtn').classList.toggle('btn-primary', viewType === 'flat');
-    document.getElementById('flatViewBtn').classList.toggle('btn-outline-secondary', viewType !== 'flat');
-    
-    // 뷰 전환
-    document.getElementById('repositoryView').style.display = viewType === 'repositories' ? 'block' : 'none';
-    document.getElementById('flatView').style.display = viewType === 'flat' ? 'block' : 'none';
+    if (view === 'repositories') {
+        repoView.style.display = 'block';
+        flatView.style.display = 'none';
+        repoBtn.classList.add('active');
+        repoBtn.classList.remove('btn-outline-primary');
+        repoBtn.classList.add('btn-primary');
+        flatBtn.classList.remove('active', 'btn-primary');
+        flatBtn.classList.add('btn-outline-secondary');
+    } else {
+        repoView.style.display = 'none';
+        flatView.style.display = 'block';
+        flatBtn.classList.add('active');
+        flatBtn.classList.remove('btn-outline-secondary');
+        flatBtn.classList.add('btn-primary');
+        repoBtn.classList.remove('active', 'btn-primary');
+        repoBtn.classList.add('btn-outline-primary');
+        
+        // 평면 보기일 때 취약점 정보 로드
+        loadVulnerabilityInfo();
+    }
 }
 
-// 저장소 데이터 로드
-function loadRepositoryData() {
-    const repoCards = document.querySelectorAll('.repository-card');
-    allRepositories = Array.from(repoCards).map(card => ({
-        element: card,
-        name: card.dataset.repo.toLowerCase()
-    }));
-}
-
-// 저장소 필터링
+// 저장소 검색
 function filterRepositories() {
     const searchTerm = document.getElementById('repoSearchInput').value.toLowerCase();
+    const repoCards = document.querySelectorAll('.repository-card');
+    const sbomRows = document.querySelectorAll('.sbom-row');
     
-    allRepositories.forEach(repo => {
-        const matches = repo.name.includes(searchTerm);
-        repo.element.style.display = matches ? 'block' : 'none';
+    // 저장소별 보기에서 필터링
+    repoCards.forEach(card => {
+        const repoName = card.dataset.repo.toLowerCase();
+        if (repoName.includes(searchTerm)) {
+            card.style.display = 'block';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+    
+    // 평면 보기에서 필터링
+    sbomRows.forEach(row => {
+        const repoName = row.dataset.repo.toLowerCase();
+        const modulePath = row.dataset.module.toLowerCase();
+        if (repoName.includes(searchTerm) || modulePath.includes(searchTerm)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
     });
 }
 
-// 검색 초기화
 function clearSearch() {
     document.getElementById('repoSearchInput').value = '';
     filterRepositories();
-}
-
-// 취약점 데이터 로드
-async function loadVulnerabilityData() {
-    const vulnerabilityInfos = document.querySelectorAll('.vulnerability-info');
-    const riskLevels = document.querySelectorAll('.risk-level');
-    
-    for (const info of vulnerabilityInfos) {
-        const sbomId = info.dataset.sbomId;
-        try {
-            const response = await fetch(`/api/v1/sboms/${sbomId}/vulnerabilities`);
-            if (response.ok) {
-                const vulnerabilities = await response.json();
-                updateVulnerabilityDisplay(info, vulnerabilities);
-                updateRiskLevel(document.querySelector(`[data-sbom-id="${sbomId}"].risk-level`), vulnerabilities);
-            } else {
-                info.innerHTML = '<span class="text-muted">-</span>';
-            }
-        } catch (error) {
-            console.error('취약점 데이터 로드 실패:', error);
-            info.innerHTML = '<span class="text-danger">오류</span>';
-        }
-    }
-}
-
-// 취약점 표시 업데이트
-function updateVulnerabilityDisplay(container, vulnerabilities) {
-    if (!vulnerabilities || vulnerabilities.length === 0) {
-        container.innerHTML = '<span class="badge bg-success">0</span>';
-        return;
-    }
-    
-    const severityCounts = {
-        Critical: 0,
-        High: 0,
-        Medium: 0,
-        Low: 0
-    };
-    
-    vulnerabilities.forEach(vuln => {
-        if (severityCounts.hasOwnProperty(vuln.severity)) {
-            severityCounts[vuln.severity]++;
-        }
-    });
-    
-    let html = `<span class="badge bg-warning">${vulnerabilities.length}</span>`;
-    
-    if (severityCounts.Critical > 0 || severityCounts.High > 0) {
-        html += ` <small class="text-danger">(C:${severityCounts.Critical}, H:${severityCounts.High})</small>`;
-    }
-    
-    container.innerHTML = html;
-}
-
-// 위험도 업데이트
-function updateRiskLevel(container, vulnerabilities) {
-    if (!container) return;
-    
-    if (!vulnerabilities || vulnerabilities.length === 0) {
-        container.innerHTML = '<span class="badge bg-success">안전</span>';
-        return;
-    }
-    
-    const severityCounts = {
-        Critical: 0,
-        High: 0,
-        Medium: 0,
-        Low: 0
-    };
-    
-    vulnerabilities.forEach(vuln => {
-        if (severityCounts.hasOwnProperty(vuln.severity)) {
-            severityCounts[vuln.severity]++;
-        }
-    });
-    
-    let riskLevel = '낮음';
-    let badgeClass = 'bg-success';
-    
-    if (severityCounts.Critical > 0) {
-        riskLevel = '매우 높음';
-        badgeClass = 'bg-danger';
-    } else if (severityCounts.High > 5) {
-        riskLevel = '높음';
-        badgeClass = 'bg-warning';
-    } else if (severityCounts.High > 0 || severityCounts.Medium > 10) {
-        riskLevel = '보통';
-        badgeClass = 'bg-info';
-    }
-    
-    container.innerHTML = `<span class="badge ${badgeClass}">${riskLevel}</span>`;
 }
 
 // 새 스캔 모달 표시
@@ -513,33 +543,35 @@ function showNewScanModal() {
 
 // 새 스캔 시작
 async function startNewScan() {
-    const form = document.getElementById('newScanForm');
-    if (!form.checkValidity()) {
-        form.reportValidity();
+    const repoPath = document.getElementById('scanRepoPath').value;
+    const repoName = document.getElementById('scanRepoName').value;
+    const modulePath = document.getElementById('scanModulePath').value || '.';
+    const scanType = document.getElementById('scanType').value;
+    
+    if (!repoPath || !repoName) {
+        alert('저장소 경로와 이름을 입력해주세요.');
         return;
     }
     
-    const scanRequest = {
-        repo_path: document.getElementById('repoPath').value,
-        repo_name: document.getElementById('repoName').value,
-        module_path: document.getElementById('modulePath').value || '.',
-        scan_type: document.getElementById('scanType').value
-    };
-    
     try {
-        const response = await fetch('/api/v1/scan/start', {
+        const response = await fetch('/api/v1/scans', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(scanRequest)
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                repository_path: repoPath,
+                repository_name: repoName,
+                module_path: modulePath,
+                scan_type: scanType
+            })
         });
         
         if (response.ok) {
             const result = await response.json();
-            bootstrap.Modal.getInstance(document.getElementById('newScanModal')).hide();
-            
             alert(`스캔이 시작되었습니다. 스캔 ID: ${result.scan_id}`);
-            
-            // 페이지 새로고침 또는 실시간 업데이트
+            bootstrap.Modal.getInstance(document.getElementById('newScanModal')).hide();
+            document.getElementById('newScanForm').reset();
             setTimeout(() => location.reload(), 2000);
         } else {
             const error = await response.json();
@@ -574,37 +606,258 @@ async function rescanSBOM(sbomId) {
     }
 }
 
-// 저장소 전체 재스캔
-async function rescanRepository(repoName) {
-    if (!confirm(`"${repoName}" 저장소의 모든 모듈을 재스캔하시겠습니까?`)) return;
+// 저장소 전체 재스캔 - 단일/멀티 모듈 구분 처리
+async function rescanRepository(repoName, moduleCount) {
+    const isSingleModule = moduleCount === 1;
+    const confirmMessage = isSingleModule 
+        ? `"${repoName}" 저장소의 모듈을 재스캔하시겠습니까?`
+        : `"${repoName}" 저장소의 ${moduleCount}개 모듈을 모두 재스캔하시겠습니까?`;
+    
+    if (!confirm(confirmMessage)) return;
     
     try {
-        // 해당 저장소의 모든 SBOM ID 수집
-        const repoCard = document.querySelector(`[data-repo="${repoName}"]`);
-        const sbomIds = Array.from(repoCard.querySelectorAll('[data-sbom-id]'))
-            .map(el => el.dataset.sbomId);
-        
-        let successCount = 0;
-        let totalCount = sbomIds.length;
-        
-        for (const sbomId of sbomIds) {
-            try {
-                const response = await fetch(`/api/v1/sboms/${sbomId}/rescan`, {
-                    method: 'POST'
-                });
-                if (response.ok) successCount++;
-            } catch (error) {
-                console.error(`SBOM ${sbomId} 재스캔 실패:`, error);
+        // 새로운 전용 API 엔드포인트 사용
+        const response = await fetch(`/api/v1/repositories/${encodeURIComponent(repoName)}/rescan`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '재스캔 시작에 실패했습니다.');
         }
         
-        alert(`${totalCount}개 모듈 중 ${successCount}개 모듈의 재스캔이 시작되었습니다.`);
-        setTimeout(() => location.reload(), 3000);
+        const result = await response.json();
+        
+        // 성공 메시지 표시
+        alert(result.message);
+        
+        // 결과에 따른 페이지 새로고침 시간 설정
+        const refreshTime = result.is_single ? 2000 : (result.module_count * 1000);
+        
+        // 진행상황 표시를 위한 간단한 로그
+        console.log(`저장소 재스캔 시작됨:`, {
+            repository: repoName,
+            modules: result.modules,
+            scanIds: result.scan_ids,
+            isSingle: result.is_single
+        });
+        
+        // 페이지 새로고침
+        setTimeout(() => location.reload(), Math.min(refreshTime, 5000)); // 최대 5초
         
     } catch (error) {
         console.error('저장소 재스캔 오류:', error);
-        alert('저장소 재스캔 중 오류가 발생했습니다.');
+        alert(`저장소 재스캔 중 오류가 발생했습니다: ${error.message}`);
     }
 }
+
+// SBOM 삭제
+async function deleteSBOM(sbomId) {
+    if (!confirm('이 SBOM을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+    
+    try {
+        const response = await fetch(`/api/v1/sboms/${sbomId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert('SBOM이 삭제되었습니다.');
+            location.reload();
+        } else {
+            const error = await response.json();
+            alert(`삭제 실패: ${error.error}`);
+        }
+    } catch (error) {
+        console.error('삭제 오류:', error);
+        alert('삭제 중 오류가 발생했습니다.');
+    }
+}
+
+// 체크박스 관련 함수들
+function toggleSelectAll() {
+    const selectAllCheckbox = document.getElementById('selectAll');
+    const sbomCheckboxes = document.querySelectorAll('.sbom-checkbox');
+    
+    sbomCheckboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+    });
+    
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    const selectedCheckboxes = document.querySelectorAll('.sbom-checkbox:checked');
+    const count = selectedCheckboxes.length;
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+    const selectAllCheckbox = document.getElementById('selectAll');
+    
+    selectedCountSpan.textContent = count;
+    
+    if (count > 0) {
+        deleteSelectedBtn.style.display = 'block';
+    } else {
+        deleteSelectedBtn.style.display = 'none';
+    }
+    
+    // 전체 선택 체크박스 상태 업데이트
+    const allCheckboxes = document.querySelectorAll('.sbom-checkbox');
+    if (allCheckboxes.length > 0) {
+        selectAllCheckbox.indeterminate = count > 0 && count < allCheckboxes.length;
+        selectAllCheckbox.checked = count === allCheckboxes.length;
+    }
+}
+
+// 선택된 SBOM들 삭제
+async function deleteSelectedSBOMs() {
+    const selectedCheckboxes = document.querySelectorAll('.sbom-checkbox:checked');
+    const selectedIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.value));
+    
+    if (selectedIds.length === 0) {
+        alert('삭제할 SBOM을 선택해주세요.');
+        return;
+    }
+    
+    // 선택된 SBOM 정보 수집 (확인 메시지용)
+    const selectedSBOMs = selectedIds.map(id => {
+        const row = document.querySelector(`tr[data-sbom-id="${id}"]`);
+        const repoName = row.dataset.repo;
+        const modulePath = row.dataset.module;
+        return `${repoName}/${modulePath}`;
+    });
+    
+    const confirmMessage = `다음 ${selectedIds.length}개의 SBOM을 삭제하시겠습니까?\n\n${selectedSBOMs.join('\n')}\n\n이 작업은 되돌릴 수 없습니다.`;
+    
+    if (!confirm(confirmMessage)) return;
+    
+    try {
+        const response = await fetch('/api/v1/sboms', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sbom_ids: selectedIds
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(`${result.deleted_count}개의 SBOM이 삭제되었습니다.`);
+            location.reload();
+        } else {
+            const error = await response.json();
+            alert(`삭제 실패: ${error.error}`);
+        }
+    } catch (error) {
+        console.error('삭제 오류:', error);
+        alert('삭제 중 오류가 발생했습니다.');
+    }
+}
+
+// 저장소 삭제
+async function deleteRepository(repoName, moduleCount) {
+    const confirmMessage = `"${repoName}" 저장소와 관련된 모든 ${moduleCount}개의 SBOM을 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`;
+    
+    if (!confirm(confirmMessage)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/repositories/${encodeURIComponent(repoName)}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message);
+            location.reload();
+        } else {
+            const error = await response.json();
+            alert(`삭제 실패: ${error.error}`);
+        }
+    } catch (error) {
+        console.error('저장소 삭제 오류:', error);
+        alert('저장소 삭제 중 오류가 발생했습니다.');
+    }
+}
+
+// 취약점 정보 로드 (평면 보기용)
+async function loadVulnerabilityInfo() {
+    const vulnInfos = document.querySelectorAll('.vulnerability-info');
+    const riskLevels = document.querySelectorAll('.risk-level');
+    
+    for (const vulnInfo of vulnInfos) {
+        const sbomId = vulnInfo.dataset.sbomId;
+        try {
+            const response = await fetch(`/api/v1/sboms/${sbomId}/vulnerabilities`);
+            if (response.ok) {
+                const vulnerabilities = await response.json();
+                const vulnCount = vulnerabilities.length;
+                
+                let criticalCount = 0, highCount = 0;
+                vulnerabilities.forEach(vuln => {
+                    if (vuln.severity === 'Critical') criticalCount++;
+                    else if (vuln.severity === 'High') highCount++;
+                });
+                
+                // 취약점 수 업데이트
+                let badgeClass = 'bg-success';
+                if (criticalCount > 0) badgeClass = 'bg-danger';
+                else if (highCount > 0) badgeClass = 'bg-warning';
+                else if (vulnCount > 0) badgeClass = 'bg-info';
+                
+                vulnInfo.innerHTML = `<span class="badge ${badgeClass} text-dark">${vulnCount}</span>`;
+                
+                // 위험도 업데이트
+                const riskLevel = document.querySelector(`.risk-level[data-sbom-id="${sbomId}"]`);
+                if (riskLevel) {
+                    let riskText = '안전', riskClass = 'bg-success';
+                    if (criticalCount > 0) {
+                        riskText = '매우 위험';
+                        riskClass = 'bg-danger';
+                    } else if (highCount > 5) {
+                        riskText = '위험';
+                        riskClass = 'bg-warning';
+                    } else if (highCount > 0) {
+                        riskText = '보통';
+                        riskClass = 'bg-info';
+                    }
+                    riskLevel.innerHTML = `<span class="badge ${riskClass}">${riskText}</span>`;
+                }
+            }
+        } catch (error) {
+            console.error(`SBOM ${sbomId} 취약점 로드 실패:`, error);
+            vulnInfo.innerHTML = '<span class="badge bg-secondary">오류</span>';
+        }
+    }
+}
+
+// 토글 아이콘 회전과 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    const toggleButtons = document.querySelectorAll('.toggle-repo');
+    toggleButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const icon = this.querySelector('.toggle-icon');
+            setTimeout(() => {
+                const target = document.querySelector(this.dataset.bsTarget);
+                if (target.classList.contains('show')) {
+                    icon.classList.remove('bi-chevron-right');
+                    icon.classList.add('bi-chevron-down');
+                } else {
+                    icon.classList.remove('bi-chevron-down');
+                    icon.classList.add('bi-chevron-right');
+                }
+            }, 100);
+        });
+    });
+    
+    // 초기 체크박스 상태 설정
+    updateSelectedCount();
+    
+    // 취약점 정보 로드
+    loadVulnerabilityInfo();
+});
 </script>
 {{end}} 

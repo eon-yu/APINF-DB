@@ -19,6 +19,99 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// createTestTables creates necessary tables for testing if migrations fail
+func createTestTables(database *db.Database) error {
+	// Create basic tables needed for testing
+	tables := []string{
+		`CREATE TABLE IF NOT EXISTS sboms (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			repo_name TEXT NOT NULL,
+			module_path TEXT NOT NULL DEFAULT '.',
+			scan_date DATETIME NOT NULL,
+			syft_version TEXT NOT NULL,
+			raw_sbom TEXT NOT NULL,
+			component_count INTEGER NOT NULL DEFAULT 0,
+			tenant_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS components (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			sbom_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			type TEXT NOT NULL,
+			language TEXT NOT NULL,
+			purl TEXT,
+			cpe TEXT,
+			licenses TEXT,
+			tenant_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (sbom_id) REFERENCES sboms(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS vulnerabilities (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			component_id INTEGER NOT NULL,
+			vuln_id TEXT NOT NULL,
+			severity TEXT NOT NULL,
+			cvss3_score REAL,
+			description TEXT,
+			fixes TEXT,
+			tenant_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS license_policies (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			license_name TEXT NOT NULL,
+			action TEXT NOT NULL,
+			reason TEXT,
+			is_active BOOLEAN DEFAULT TRUE,
+			tenant_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS vulnerability_policies (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			min_severity_level TEXT NOT NULL,
+			action TEXT NOT NULL,
+			is_active BOOLEAN DEFAULT TRUE,
+			tenant_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS scan_results (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			sbom_id INTEGER NOT NULL,
+			repo_name TEXT NOT NULL,
+			module_path TEXT NOT NULL,
+			scan_start_time DATETIME NOT NULL,
+			scan_end_time DATETIME,
+			status TEXT NOT NULL,
+			total_components INTEGER DEFAULT 0,
+			vulnerabilities_found INTEGER DEFAULT 0,
+			license_violations INTEGER DEFAULT 0,
+			critical_vulns INTEGER DEFAULT 0,
+			high_vulns INTEGER DEFAULT 0,
+			medium_vulns INTEGER DEFAULT 0,
+			low_vulns INTEGER DEFAULT 0,
+			overall_risk TEXT,
+			tenant_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (sbom_id) REFERENCES sboms(id) ON DELETE CASCADE
+		)`,
+	}
+
+	for _, table := range tables {
+		_, err := database.Exec(table)
+		if err != nil {
+			return fmt.Errorf("failed to create table: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // setupTestServer creates a test server with in-memory database
 func setupTestServer(t *testing.T) (*DashboardServer, func()) {
 	// Create temporary directory for test database
@@ -28,6 +121,15 @@ func setupTestServer(t *testing.T) (*DashboardServer, func()) {
 	dbPath := filepath.Join(tempDir, "test.db")
 	database, err := db.NewDatabase("sqlite3", dbPath)
 	require.NoError(t, err)
+
+	// Ensure migrations are run for test database
+	// First try to run migrations, if it fails, try manual table creation
+	err = database.RunMigrations()
+	if err != nil {
+		// If migrations fail, create tables manually for testing
+		err = createTestTables(database)
+		require.NoError(t, err)
+	}
 
 	// Create templates directory
 	templatesDir := filepath.Join(tempDir, "web", "templates", "layouts")
