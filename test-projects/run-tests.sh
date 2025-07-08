@@ -83,10 +83,13 @@ run_test "go-app" "go-app" ""
 # 3. Python 프로젝트 테스트
 run_test "python-app" "python-app" ""
 
-# 4. 멀티 모듈 프로젝트 테스트 - 전체
+# 4. C++ 프로젝트 테스트
+run_test "cpp-app" "cpp-app" ""
+
+# 5. 멀티 모듈 프로젝트 테스트 - 전체
 run_test "multi-module-all" "multi-module" ""
 
-# 5. 멀티 모듈 프로젝트 테스트 - 개별 모듈
+# 6. 멀티 모듈 프로젝트 테스트 - 개별 모듈
 run_test "multi-module-frontend" "multi-module" "frontend"
 run_test "multi-module-backend" "multi-module" "backend"
 run_test "multi-module-data-service" "multi-module" "data-service"
@@ -102,7 +105,8 @@ echo -e "${BLUE}📊 테스트 결과 요약:${NC}"
 echo "1. Node.js 앱: 취약한 axios, lodash 등 검출 예상"
 echo "2. Go 앱: 취약한 JWT 라이브러리 등 검출 예상"  
 echo "3. Python 앱: 다양한 취약한 패키지들 검출 예상"
-echo "4. 멀티 모듈: 각 모듈별 개별 스캔 및 통합 스캔"
+echo "4. C++ 앱: OpenSSL, libcurl 등 시스템 라이브러리 취약점 검출 예상"
+echo "5. 멀티 모듈: 각 모듈별 개별 스캔 및 통합 스캔"
 
 echo ""
 echo -e "${YELLOW}💡 다음 단계:${NC}"

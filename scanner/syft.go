@@ -112,6 +112,14 @@ func (s *SyftScanner) GenerateSBOM(ctx context.Context, targetPath string, optio
 		return nil, fmt.Errorf("failed to parse SBOM JSON: %w", err)
 	}
 
+	// Process licenses for each artifact
+	for i := range syftOutput.Artifacts {
+		if err := syftOutput.Artifacts[i].UnmarshalLicenses(); err != nil {
+			// Log error but continue processing
+			fmt.Printf("Warning: failed to parse licenses for artifact %s: %v\n", syftOutput.Artifacts[i].Name, err)
+		}
+	}
+
 	// Get Syft version
 	syftVersion, err := s.GetVersion(ctx)
 	if err != nil {
@@ -161,6 +169,14 @@ func (s *SyftScanner) ParseSBOMToComponents(sbom *models.SBOM) ([]*models.Compon
 	var syftOutput models.SyftOutput
 	if err := json.Unmarshal([]byte(sbom.RawSBOM), &syftOutput); err != nil {
 		return nil, fmt.Errorf("failed to parse SBOM JSON: %w", err)
+	}
+
+	// Process licenses for each artifact
+	for i := range syftOutput.Artifacts {
+		if err := syftOutput.Artifacts[i].UnmarshalLicenses(); err != nil {
+			// Log error but continue processing
+			fmt.Printf("Warning: failed to parse licenses for artifact %s: %v\n", syftOutput.Artifacts[i].Name, err)
+		}
 	}
 
 	var components []*models.Component

@@ -168,11 +168,18 @@
                 
                 <div class="mt-3">
                     <h6>최근 스캔 대상 저장소:</h6>
-                    <div class="d-flex flex-wrap gap-2">
-                        <span class="badge bg-secondary">frontend</span>
-                        <span class="badge bg-secondary">backend-api</span>
-                        <span class="badge bg-secondary">auth-service</span>
-                        <span class="badge bg-secondary">notification-service</span>
+                    <div class="d-flex flex-wrap gap-2" id="recentRepositories">
+                        {{if .Stats.recent_repository_info}}
+                            {{range .Stats.recent_repository_info}}
+                                <a href="/sboms/{{.SBOMID}}" class="badge bg-secondary text-decoration-none" 
+                                   title="{{.RepoName}} - 컴포넌트: {{.ComponentCount}}, 취약점: {{.VulnCount}} ({{.ScanDate}})">
+                                    {{.RepoName}}
+                                    <small class="ms-1">({{.ComponentCount}}c, {{.VulnCount}}v)</small>
+                                </a>
+                            {{end}}
+                        {{else}}
+                            <span class="text-muted">아직 스캔된 저장소가 없습니다</span>
+                        {{end}}
                     </div>
                 </div>
             </div>

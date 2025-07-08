@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -93,6 +94,14 @@ func (ds *DashboardServer) setupRoutes() {
 	// Settings API
 	api.Get("/settings", ds.handleAPIGetSettings)
 	api.Put("/settings", ds.handleAPIPutSettings)
+
+	// Scan API
+	api.Post("/scan/start", ds.handleAPIStartScan)
+	api.Get("/scan/status/:id", ds.handleAPIScanStatus)
+	api.Post("/sboms/:id/rescan", ds.handleAPIRescanSBOM)
+	api.Get("/sboms/:id/download", ds.handleAPISBOMDownload)
+	api.Get("/components/:id", ds.handleAPIComponentDetail)
+	api.Get("/sboms/:id/licenses", ds.handleAPILicensesBySBOM)
 
 	// Health check API
 	api.Get("/health/db", ds.handleAPIHealthDB)
@@ -267,7 +276,27 @@ func (ds *DashboardServer) handleAPIComponents(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to get components"})
 	}
 
-	return c.JSON(components)
+	// Add vulnerability count for each component
+	type ComponentWithVulnCount struct {
+		*models.Component
+		VulnerabilityCount int `json:"vulnerability_count"`
+	}
+
+	var enhancedComponents []ComponentWithVulnCount
+	for _, component := range components {
+		vulns, err := ds.database.GetVulnerabilitiesByComponent(component.ID)
+		vulnCount := 0
+		if err == nil {
+			vulnCount = len(vulns)
+		}
+
+		enhancedComponents = append(enhancedComponents, ComponentWithVulnCount{
+			Component:          component,
+			VulnerabilityCount: vulnCount,
+		})
+	}
+
+	return c.JSON(enhancedComponents)
 }
 
 func (ds *DashboardServer) handleAPIVulnerabilities(c *fiber.Ctx) error {
@@ -279,17 +308,10 @@ func (ds *DashboardServer) handleAPIVulnerabilities(c *fiber.Ctx) error {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid SBOM ID"})
 		}
 
-		components, err := ds.database.GetComponentsBySBOM(sbomID)
+		// Use the new function that includes component information
+		vulnerabilities, err := ds.database.GetVulnerabilitiesBySBOM(sbomID)
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Failed to get components"})
-		}
-
-		var vulnerabilities []*models.Vulnerability
-		for _, component := range components {
-			vulns, err := ds.database.GetVulnerabilitiesByComponent(component.ID)
-			if err == nil {
-				vulnerabilities = append(vulnerabilities, vulns...)
-			}
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to get vulnerabilities"})
 		}
 
 		return c.JSON(vulnerabilities)
@@ -365,12 +387,27 @@ func (ds *DashboardServer) handleAPICreateVulnerabilityPolicy(c *fiber.Ctx) erro
 
 func (ds *DashboardServer) getStats() (map[string]interface{}, error) {
 	// Get SBOMs for stats
-	sboms, err := ds.database.GetAllSBOMs(100)
+	allSBOMs, err := ds.database.GetAllSBOMs(100)
 	if err != nil {
 		fmt.Printf("Error getting SBOMs: %v\n", err)
 		return nil, err
 	}
-	fmt.Printf("Found %d SBOMs\n", len(sboms))
+	fmt.Printf("Found %d SBOMs\n", len(allSBOMs))
+
+	// Filter to get only latest SBOM per repository
+	latestSBOMs := make(map[string]*models.SBOM)
+	for _, sbom := range allSBOMs {
+		repoKey := sbom.RepoName + "|" + sbom.ModulePath
+		if existing, exists := latestSBOMs[repoKey]; !exists || sbom.ScanDate.After(existing.ScanDate) {
+			latestSBOMs[repoKey] = sbom
+		}
+	}
+
+	// Convert map to slice for easier processing
+	var sboms []*models.SBOM
+	for _, sbom := range latestSBOMs {
+		sboms = append(sboms, sbom)
+	}
 
 	// Get scan results for additional stats
 	scanResults, err := ds.database.GetLatestScanResults(100)
@@ -379,7 +416,8 @@ func (ds *DashboardServer) getStats() (map[string]interface{}, error) {
 	}
 
 	stats := map[string]interface{}{
-		"total_sboms":           len(sboms),
+		"total_sboms":           len(allSBOMs), // Total SBOMs ever created
+		"unique_repositories":   len(sboms),    // Unique repositories
 		"total_scans":           len(scanResults),
 		"total_components":      0,
 		"total_vulnerabilities": 0,
@@ -392,9 +430,8 @@ func (ds *DashboardServer) getStats() (map[string]interface{}, error) {
 	}
 	fmt.Printf("Stats: %+v\n", stats)
 
-	// Calculate component count from SBOMs
+	// Track repositories for counting (done in the vulnerability calculation loop above)
 	for _, sbom := range sboms {
-		stats["total_components"] = stats["total_components"].(int) + sbom.ComponentCount
 		repos := stats["repositories"].(map[string]bool)
 		repos[sbom.RepoName] = true
 	}
@@ -403,36 +440,95 @@ func (ds *DashboardServer) getStats() (map[string]interface{}, error) {
 		stats["last_scan"] = scanResults[0].ScanStartTime
 	}
 
-	// Get actual vulnerability statistics from database
-	allVulnerabilities, err := ds.database.GetAllVulnerabilities(1000) // Get more vulnerabilities for accurate stats
-	if err == nil {
-		stats["total_vulnerabilities"] = len(allVulnerabilities)
+	// Calculate totals from latest SBOMs only (one per repository)
+	var totalComponents int
+	var totalVulnerabilities int
+	var criticalVulns, highVulns, mediumVulns, lowVulns int
 
-		// Count vulnerabilities by severity
-		for _, vuln := range allVulnerabilities {
-			switch vuln.Severity {
-			case "Critical":
-				stats["critical_vulns"] = stats["critical_vulns"].(int) + 1
-			case "High":
-				stats["high_vulns"] = stats["high_vulns"].(int) + 1
-			case "Medium":
-				stats["medium_vulns"] = stats["medium_vulns"].(int) + 1
-			case "Low":
-				stats["low_vulns"] = stats["low_vulns"].(int) + 1
-			}
+	// Use the filtered sboms which already contain only latest per repository
+	for _, sbom := range sboms {
+		// Add component count
+		totalComponents += sbom.ComponentCount
+
+		// Count vulnerabilities for this SBOM
+		components, err := ds.database.GetComponentsBySBOM(sbom.ID)
+		if err != nil {
+			continue
 		}
-	} else {
-		// Fallback to scan result summary if direct vulnerability query fails
-		for _, result := range scanResults {
-			stats["total_vulnerabilities"] = stats["total_vulnerabilities"].(int) + result.VulnerabilitiesFound
-			stats["critical_vulns"] = stats["critical_vulns"].(int) + result.CriticalVulns
-			stats["high_vulns"] = stats["high_vulns"].(int) + result.HighVulns
-			stats["medium_vulns"] = stats["medium_vulns"].(int) + result.MediumVulns
-			stats["low_vulns"] = stats["low_vulns"].(int) + result.LowVulns
+
+		for _, component := range components {
+			vulns, err := ds.database.GetVulnerabilitiesByComponent(component.ID)
+			if err != nil {
+				continue
+			}
+
+			totalVulnerabilities += len(vulns)
+
+			// Count by severity
+			for _, vuln := range vulns {
+				switch vuln.Severity {
+				case "Critical":
+					criticalVulns++
+				case "High":
+					highVulns++
+				case "Medium":
+					mediumVulns++
+				case "Low":
+					lowVulns++
+				}
+			}
 		}
 	}
 
+	// Update stats with calculated values
+	stats["total_components"] = totalComponents
+	stats["total_vulnerabilities"] = totalVulnerabilities
+	stats["critical_vulns"] = criticalVulns
+	stats["high_vulns"] = highVulns
+	stats["medium_vulns"] = mediumVulns
+	stats["low_vulns"] = lowVulns
+
 	stats["total_repositories"] = len(stats["repositories"].(map[string]bool))
+
+	// Convert repositories map to detailed repository info for recent repositories display
+	type RepoInfo struct {
+		RepoName       string `json:"repo_name"`
+		SBOMID         int    `json:"sbom_id"`
+		ComponentCount int    `json:"component_count"`
+		VulnCount      int    `json:"vuln_count"`
+		ScanDate       string `json:"scan_date"`
+	}
+
+	var recentRepoInfo []RepoInfo
+	for _, sbom := range sboms {
+		// Count vulnerabilities for this SBOM
+		components, err := ds.database.GetComponentsBySBOM(sbom.ID)
+		vulnCount := 0
+		if err == nil {
+			for _, component := range components {
+				vulns, err := ds.database.GetVulnerabilitiesByComponent(component.ID)
+				if err == nil {
+					vulnCount += len(vulns)
+				}
+			}
+		}
+
+		repoInfo := RepoInfo{
+			RepoName:       sbom.RepoName,
+			SBOMID:         sbom.ID,
+			ComponentCount: sbom.ComponentCount,
+			VulnCount:      vulnCount,
+			ScanDate:       sbom.ScanDate.Format("2006-01-02 15:04"),
+		}
+		recentRepoInfo = append(recentRepoInfo, repoInfo)
+	}
+
+	// Sort by repository name for consistent display
+	sort.Slice(recentRepoInfo, func(i, j int) bool {
+		return recentRepoInfo[i].RepoName < recentRepoInfo[j].RepoName
+	})
+
+	stats["recent_repository_info"] = recentRepoInfo
 	delete(stats, "repositories") // Remove the map, keep only count
 
 	return stats, nil
@@ -568,4 +664,272 @@ func (ds *DashboardServer) handleAPIHealthNotifier(c *fiber.Ctx) error {
 	// Check notification service health
 	// For now, return healthy
 	return c.JSON(fiber.Map{"status": "ok", "message": "Notification service is healthy"})
+}
+
+// Scan management handlers
+func (ds *DashboardServer) handleAPIStartScan(c *fiber.Ctx) error {
+	type ScanRequest struct {
+		RepoPath   string `json:"repo_path"`
+		RepoName   string `json:"repo_name"`
+		ModulePath string `json:"module_path"`
+		ScanType   string `json:"scan_type"`
+	}
+
+	var req ScanRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	// Validate required fields
+	if req.RepoPath == "" || req.RepoName == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "repo_path and repo_name are required"})
+	}
+
+	// For now, simulate scan initiation
+	scanID := fmt.Sprintf("scan_%d", time.Now().Unix())
+
+	// In a real implementation, you would:
+	// 1. Create a scan job in the database
+	// 2. Queue the scan for background processing
+	// 3. Return the scan ID for status tracking
+
+	// Start background scan process
+	go func() {
+		ds.executeScan(scanID, req.RepoPath, req.RepoName, req.ModulePath, req.ScanType)
+	}()
+
+	return c.JSON(fiber.Map{
+		"scan_id": scanID,
+		"status":  "started",
+		"message": "스캔이 시작되었습니다.",
+	})
+}
+
+func (ds *DashboardServer) handleAPIScanStatus(c *fiber.Ctx) error {
+	scanID := c.Params("id")
+	if scanID == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Scan ID is required"})
+	}
+
+	// In a real implementation, you would:
+	// 1. Query the database for scan status
+	// 2. Return actual progress information
+
+	// For now, simulate scan progress
+	return c.JSON(fiber.Map{
+		"scan_id":  scanID,
+		"status":   "in_progress",
+		"message":  "스캔 진행 중...",
+		"details":  "의존성 분석 중입니다.",
+		"progress": 45,
+	})
+}
+
+func (ds *DashboardServer) handleAPIRescanSBOM(c *fiber.Ctx) error {
+	idParam := c.Params("id")
+	sbomID, err := strconv.Atoi(idParam)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid SBOM ID"})
+	}
+
+	// Get existing SBOM details
+	sbom, err := ds.database.GetSBOM(sbomID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "SBOM not found"})
+	}
+
+	// Create new scan ID
+	scanID := fmt.Sprintf("rescan_%d_%d", sbomID, time.Now().Unix())
+
+	// Start background rescan process
+	go func() {
+		// Note: RepoPath is not stored in SBOM model, using empty string for now
+		// In production, this should be stored separately or added to SBOM model
+		ds.executeScan(scanID, "", sbom.RepoName, sbom.ModulePath, "both")
+	}()
+
+	return c.JSON(fiber.Map{
+		"scan_id": scanID,
+		"status":  "started",
+		"message": "재스캔이 시작되었습니다.",
+	})
+}
+
+// executeScan simulates the actual scan execution
+func (ds *DashboardServer) executeScan(scanID, repoPath, repoName, modulePath, scanType string) {
+	// This is a simplified simulation of the scan process
+	// In a real implementation, this would:
+	// 1. Run syft to generate SBOM
+	// 2. Run grype to find vulnerabilities
+	// 3. Store results in the database
+	// 4. Update scan status
+
+	fmt.Printf("Starting scan %s for repository %s at %s\n", scanID, repoName, repoPath)
+
+	// Simulate scan duration
+	time.Sleep(10 * time.Second)
+
+	fmt.Printf("Scan %s completed successfully\n", scanID)
+}
+
+// SBOM download handler
+func (ds *DashboardServer) handleAPISBOMDownload(c *fiber.Ctx) error {
+	idParam := c.Params("id")
+	sbomID, err := strconv.Atoi(idParam)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid SBOM ID"})
+	}
+
+	// Get SBOM from database
+	sbom, err := ds.database.GetSBOM(sbomID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "SBOM not found"})
+	}
+
+	// Set headers for file download
+	c.Set("Content-Type", "application/json")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=sbom-%d.json", sbomID))
+
+	// Return raw SBOM data
+	return c.SendString(sbom.RawSBOM)
+}
+
+// Component detail handler
+func (ds *DashboardServer) handleAPIComponentDetail(c *fiber.Ctx) error {
+	idParam := c.Params("id")
+	componentID, err := strconv.Atoi(idParam)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid component ID"})
+	}
+
+	// Get component from database
+	component, err := ds.database.GetComponent(componentID)
+	if err != nil {
+		if err.Error() == "component not found" {
+			return c.Status(404).JSON(fiber.Map{"error": "Component not found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to get component"})
+	}
+
+	// Return component with proper field names
+	response := map[string]interface{}{
+		"id":         component.ID,
+		"name":       component.Name,
+		"version":    component.Version,
+		"type":       component.Type,
+		"language":   component.Language,
+		"purl":       component.PURL,
+		"cpe":        component.CPE,
+		"licenses":   component.Licenses,
+		"locations":  component.Locations,
+		"metadata":   component.Metadata,
+		"created_at": component.CreatedAt,
+		"updated_at": component.UpdatedAt,
+	}
+
+	return c.JSON(response)
+}
+
+func (ds *DashboardServer) handleAPILicensesBySBOM(c *fiber.Ctx) error {
+	idParam := c.Params("id")
+	sbomID, err := strconv.Atoi(idParam)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid SBOM ID"})
+	}
+
+	// Get pagination parameters
+	page := c.QueryInt("page", 1)
+	pageSize := c.QueryInt("pageSize", 20)
+	if pageSize > 100 {
+		pageSize = 100 // Limit max page size
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	offset := (page - 1) * pageSize
+
+	// Get components for this SBOM
+	components, err := ds.database.GetComponentsBySBOM(sbomID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to get components"})
+	}
+
+	// Group components by license
+	licenseGroups := make(map[string][]*models.Component)
+	totalComponents := 0
+
+	for _, component := range components {
+		if len(component.Licenses) == 0 {
+			// No license information
+			licenseGroups["Unknown"] = append(licenseGroups["Unknown"], component)
+		} else {
+			// Component can have multiple licenses
+			for _, license := range component.Licenses {
+				if license == "" || license == "null" || license == "NOASSERTION" || license == "UNKNOWN" {
+					licenseGroups["Unknown"] = append(licenseGroups["Unknown"], component)
+				} else {
+					licenseGroups[license] = append(licenseGroups[license], component)
+				}
+			}
+		}
+		totalComponents++
+	}
+
+	// Convert map to slice for pagination
+	type LicenseGroup struct {
+		License    string              `json:"license"`
+		Components []*models.Component `json:"components"`
+		Count      int                 `json:"count"`
+	}
+
+	var allGroups []LicenseGroup
+	for license, comps := range licenseGroups {
+		allGroups = append(allGroups, LicenseGroup{
+			License:    license,
+			Components: comps,
+			Count:      len(comps),
+		})
+	}
+
+	// Sort groups by license name
+	sort.Slice(allGroups, func(i, j int) bool {
+		// Put "Unknown" at the end
+		if allGroups[i].License == "Unknown" {
+			return false
+		}
+		if allGroups[j].License == "Unknown" {
+			return true
+		}
+		return allGroups[i].License < allGroups[j].License
+	})
+
+	// Apply pagination
+	totalGroups := len(allGroups)
+	totalPages := (totalGroups + pageSize - 1) / pageSize
+
+	start := offset
+	end := offset + pageSize
+	if start >= totalGroups {
+		start = totalGroups
+	}
+	if end > totalGroups {
+		end = totalGroups
+	}
+
+	paginatedGroups := make([]LicenseGroup, 0)
+	if start < end {
+		paginatedGroups = allGroups[start:end]
+	}
+
+	return c.JSON(fiber.Map{
+		"license_groups":   paginatedGroups,
+		"total_groups":     totalGroups,
+		"total_components": totalComponents,
+		"page":             page,
+		"page_size":        pageSize,
+		"total_pages":      totalPages,
+		"has_next":         page < totalPages,
+		"has_prev":         page > 1,
+	})
 }

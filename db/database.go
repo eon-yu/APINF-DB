@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"log"
 	"time"
 
 	"oss-compliance-scanner/models"
@@ -16,7 +17,8 @@ var schemaFS embed.FS
 
 // Database represents the database connection and operations
 type Database struct {
-	conn *sql.DB
+	conn             *sql.DB
+	migrationManager *MigrationManager
 }
 
 // NewDatabase creates a new database connection
@@ -37,12 +39,19 @@ func NewDatabase(driverName, dataSourceName string) (*Database, error) {
 	conn.SetMaxIdleConns(10)
 	conn.SetConnMaxLifetime(5 * time.Minute)
 
-	db := &Database{conn: conn}
+	// Initialize migration manager
+	migrationsDir := "db/migrations"
+	migrationManager := NewMigrationManager(conn, migrationsDir)
 
-	// Initialize schema
-	if err := db.InitializeSchema(); err != nil {
+	db := &Database{
+		conn:             conn,
+		migrationManager: migrationManager,
+	}
+
+	// Run migrations instead of initializing schema directly
+	if err := db.RunMigrations(); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return db, nil
@@ -56,8 +65,21 @@ func (db *Database) Close() error {
 	return nil
 }
 
-// InitializeSchema creates the database schema
+// RunMigrations runs all pending database migrations
+func (db *Database) RunMigrations() error {
+	log.Println("Running database migrations...")
+	return db.migrationManager.Migrate()
+}
+
+// GetMigrationStatus returns the current migration status
+func (db *Database) GetMigrationStatus() ([]Migration, error) {
+	return db.migrationManager.GetMigrationStatus()
+}
+
+// InitializeSchema creates the database schema (deprecated - use migrations)
 func (db *Database) InitializeSchema() error {
+	log.Println("Warning: InitializeSchema is deprecated, please use migrations instead")
+
 	schema, err := schemaFS.ReadFile("schema.sql")
 	if err != nil {
 		return fmt.Errorf("failed to read schema file: %w", err)
@@ -192,8 +214,17 @@ func (db *Database) GetAllSBOMs(limit int) ([]*models.SBOM, error) {
 
 // Component Operations
 
-// CreateComponent creates a new component record
+// CreateComponent creates a new component record with improved license parsing
 func (db *Database) CreateComponent(component *models.Component) error {
+	// If we have raw license data, improve the parsing before marshaling
+	if component.LicensesJSON != "" && len(component.Licenses) == 0 {
+		// Create a temporary SyftArtifact to use the improved parsing
+		tempArtifact := &models.SyftArtifact{
+			LicensesRaw: []byte(component.LicensesJSON),
+		}
+		component.Licenses = tempArtifact.UnmarshalLicenses()
+	}
+
 	// Marshal JSON fields
 	if err := component.MarshalComponentFields(); err != nil {
 		return fmt.Errorf("failed to marshal component fields: %w", err)
@@ -218,6 +249,13 @@ func (db *Database) CreateComponent(component *models.Component) error {
 	}
 
 	component.ID = int(id)
+
+	// Update SBOM component count
+	if err := db.UpdateSBOMComponentCount(component.SBOMID); err != nil {
+		// Log error but don't fail the component creation
+		fmt.Printf("Warning: failed to update SBOM component count: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -262,6 +300,57 @@ func (db *Database) GetComponentsBySBOM(sbomID int) ([]*models.Component, error)
 	}
 
 	return components, nil
+}
+
+// GetComponent retrieves a specific component by ID
+func (db *Database) GetComponent(componentID int) (*models.Component, error) {
+	query := `
+		SELECT id, sbom_id, name, version, type, purl, cpe, language,
+		       licenses_json, locations_json, metadata_json, created_at, updated_at
+		FROM components WHERE id = ?
+	`
+
+	row := db.conn.QueryRow(query, componentID)
+
+	component := &models.Component{}
+	err := row.Scan(
+		&component.ID, &component.SBOMID, &component.Name, &component.Version,
+		&component.Type, &component.PURL, &component.CPE, &component.Language,
+		&component.LicensesJSON, &component.LocationsJSON, &component.MetadataJSON,
+		&component.CreatedAt, &component.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("component not found")
+		}
+		return nil, fmt.Errorf("failed to get component: %w", err)
+	}
+
+	// Unmarshal JSON fields
+	if err := component.UnmarshalComponentFields(); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal component fields: %w", err)
+	}
+
+	return component, nil
+}
+
+// UpdateSBOMComponentCount updates the component_count field for an SBOM
+func (db *Database) UpdateSBOMComponentCount(sbomID int) error {
+	query := `
+		UPDATE sboms 
+		SET component_count = (
+			SELECT COUNT(*) FROM components WHERE sbom_id = ?
+		),
+		updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+
+	_, err := db.conn.Exec(query, sbomID, sbomID)
+	if err != nil {
+		return fmt.Errorf("failed to update SBOM component count: %w", err)
+	}
+
+	return nil
 }
 
 // Vulnerability Operations
@@ -340,6 +429,65 @@ func (db *Database) GetVulnerabilitiesByComponent(componentID int) ([]*models.Vu
 	return vulnerabilities, nil
 }
 
+// GetVulnerabilitiesBySBOM retrieves vulnerabilities for a specific SBOM with component information
+func (db *Database) GetVulnerabilitiesBySBOM(sbomID int) ([]*models.Vulnerability, error) {
+	query := `
+		SELECT v.id, v.component_id, v.vuln_id, v.severity, v.cvss2_score, v.cvss3_score, 
+		       v.description, v.urls_json, v.published_date, v.modified_date, v.fixes_json, 
+		       v.metadata_json, v.created_at, v.updated_at,
+		       c.name as component_name, c.version as component_version, c.type as component_type
+		FROM vulnerabilities v
+		JOIN components c ON v.component_id = c.id
+		WHERE c.sbom_id = ?
+		ORDER BY v.severity DESC, c.name ASC, v.created_at DESC
+	`
+
+	rows, err := db.conn.Query(query, sbomID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query vulnerabilities by SBOM: %w", err)
+	}
+	defer rows.Close()
+
+	var vulnerabilities []*models.Vulnerability
+	for rows.Next() {
+		vuln := &models.Vulnerability{}
+		var componentName, componentVersion, componentType string
+
+		err := rows.Scan(
+			&vuln.ID, &vuln.ComponentID, &vuln.VulnID, &vuln.Severity,
+			&vuln.CVSS2Score, &vuln.CVSS3Score, &vuln.Description,
+			&vuln.URLsJSON, &vuln.PublishedDate, &vuln.ModifiedDate,
+			&vuln.FixesJSON, &vuln.MetadataJSON, &vuln.CreatedAt, &vuln.UpdatedAt,
+			&componentName, &componentVersion, &componentType,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan vulnerability: %w", err)
+		}
+
+		// Unmarshal JSON fields
+		if err := vuln.UnmarshalVulnerabilityFields(); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal vulnerability fields: %w", err)
+		}
+
+		// Add actual component info to metadata
+		if vuln.Metadata == nil {
+			vuln.Metadata = make(map[string]interface{})
+		}
+		vuln.Metadata["component_name"] = componentName
+		vuln.Metadata["component_version"] = componentVersion
+		vuln.Metadata["component_type"] = componentType
+		vuln.Metadata["component_id"] = vuln.ComponentID
+
+		vulnerabilities = append(vulnerabilities, vuln)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating vulnerabilities: %w", err)
+	}
+
+	return vulnerabilities, nil
+}
+
 // GetAllVulnerabilities retrieves all vulnerabilities with component information
 func (db *Database) GetAllVulnerabilities(limit int) ([]*models.Vulnerability, error) {
 	query := `
@@ -351,7 +499,15 @@ func (db *Database) GetAllVulnerabilities(limit int) ([]*models.Vulnerability, e
 		FROM vulnerabilities v
 		JOIN components c ON v.component_id = c.id
 		JOIN sboms s ON c.sbom_id = s.id
-		ORDER BY v.severity DESC, v.created_at DESC
+		ORDER BY 
+			CASE v.severity 
+				WHEN 'Critical' THEN 1
+				WHEN 'High' THEN 2
+				WHEN 'Medium' THEN 3
+				WHEN 'Low' THEN 4
+				ELSE 5
+			END,
+			v.created_at DESC
 		LIMIT ?
 	`
 

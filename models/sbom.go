@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -71,16 +72,76 @@ type SyftSource struct {
 }
 
 type SyftArtifact struct {
-	ID        string                 `json:"id"`
-	Name      string                 `json:"name"`
-	Version   string                 `json:"version"`
-	Type      string                 `json:"type"`
-	PURL      string                 `json:"purl"`
-	CPEs      []SyftCPE              `json:"cpes"`
-	Language  string                 `json:"language"`
-	Licenses  []string               `json:"licenses"`
-	Locations []SyftLocation         `json:"locations"`
-	Metadata  map[string]interface{} `json:"metadata"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Version     string                 `json:"version"`
+	Type        string                 `json:"type"`
+	PURL        string                 `json:"purl"`
+	CPEs        []SyftCPE              `json:"cpes"`
+	Language    string                 `json:"language"`
+	Licenses    []string               `json:"-"` // Custom handling
+	LicensesRaw json.RawMessage        `json:"licenses"`
+	Locations   []SyftLocation         `json:"locations"`
+	Metadata    map[string]interface{} `json:"metadata"`
+}
+
+// UnmarshalLicenses parses the various license formats from Syft
+func (s *SyftArtifact) UnmarshalLicenses() []string {
+	if len(s.LicensesRaw) == 0 {
+		return []string{}
+	}
+
+	// Try parsing as array of strings first
+	var stringArray []string
+	if err := json.Unmarshal(s.LicensesRaw, &stringArray); err == nil {
+		// Clean and filter valid licenses
+		var validLicenses []string
+		for _, license := range stringArray {
+			license = strings.TrimSpace(license)
+			if license != "" && license != "null" && license != "NOASSERTION" && license != "UNKNOWN" {
+				validLicenses = append(validLicenses, license)
+			}
+		}
+		return validLicenses
+	}
+
+	// Try parsing as array of objects
+	var objectArray []map[string]interface{}
+	if err := json.Unmarshal(s.LicensesRaw, &objectArray); err == nil {
+		var licenses []string
+		for _, obj := range objectArray {
+			if name, ok := obj["name"].(string); ok && name != "" {
+				name = strings.TrimSpace(name)
+				if name != "null" && name != "NOASSERTION" && name != "UNKNOWN" {
+					licenses = append(licenses, name)
+				}
+			}
+			if id, ok := obj["id"].(string); ok && id != "" {
+				id = strings.TrimSpace(id)
+				if id != "null" && id != "NOASSERTION" && id != "UNKNOWN" {
+					licenses = append(licenses, id)
+				}
+			}
+			if value, ok := obj["value"].(string); ok && value != "" {
+				value = strings.TrimSpace(value)
+				if value != "null" && value != "NOASSERTION" && value != "UNKNOWN" {
+					licenses = append(licenses, value)
+				}
+			}
+		}
+		return licenses
+	}
+
+	// Try parsing as single string
+	var singleString string
+	if err := json.Unmarshal(s.LicensesRaw, &singleString); err == nil {
+		singleString = strings.TrimSpace(singleString)
+		if singleString != "" && singleString != "null" && singleString != "NOASSERTION" && singleString != "UNKNOWN" {
+			return []string{singleString}
+		}
+	}
+
+	return []string{}
 }
 
 type SyftCPE struct {

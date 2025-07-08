@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"oss-compliance-scanner/config"
@@ -168,16 +169,20 @@ func executeScan(ctx *ScanContext) error {
 		return fmt.Errorf("failed to initialize components: %w", err)
 	}
 
-	// Process each target
-	for i, target := range scanTargets {
-		fmt.Printf("\n📦 Processing target %d/%d: %s\n", i+1, len(scanTargets), target)
-
-		if err := processScanTarget(ctx, target); err != nil {
-			log.Printf("❌ Failed to process target %s: %v", target, err)
-			continue
+	// Process targets (parallel or sequential based on target count)
+	if len(scanTargets) > 1 && len(scanTargets) <= 10 {
+		// Process targets in parallel for better performance
+		fmt.Printf("\n🔄 Processing %d targets in parallel...\n", len(scanTargets))
+		if err := processTargetsInParallel(ctx, scanTargets); err != nil {
+			log.Printf("❌ Parallel processing failed: %v", err)
+			// Fall back to sequential processing
+			fmt.Println("🔄 Falling back to sequential processing...")
+			processTargetsSequentially(ctx, scanTargets)
 		}
-
-		fmt.Printf("✅ Completed target: %s\n", target)
+	} else {
+		// Process targets sequentially
+		fmt.Printf("\n📦 Processing %d targets sequentially...\n", len(scanTargets))
+		processTargetsSequentially(ctx, scanTargets)
 	}
 
 	fmt.Println("\n📊 Generating summary report...")
@@ -277,6 +282,15 @@ func determineScanTargets(ctx *ScanContext) []string {
 func autoDiscoverTargets(repoPath string) []string {
 	var targets []string
 
+	// First, check for workspace configuration files
+	workspaceTargets := discoverWorkspaceTargets(repoPath)
+	if len(workspaceTargets) > 0 {
+		if verbose {
+			log.Printf("Found workspace configuration, using defined modules")
+		}
+		return workspaceTargets
+	}
+
 	// Look for common package files that indicate a module
 	packageFiles := []string{
 		"package.json",     // Node.js
@@ -288,11 +302,35 @@ func autoDiscoverTargets(repoPath string) []string {
 		"Cargo.toml",       // Rust
 		"composer.json",    // PHP
 		"Gemfile",          // Ruby
+		"CMakeLists.txt",   // C/C++ CMake
+		"Makefile",         // C/C++ Make
+		"conanfile.txt",    // C/C++ Conan
+		"conanfile.py",     // C/C++ Conan
+		"vcpkg.json",       // C/C++ vcpkg
+		"BUILD",            // C/C++ Bazel
+		"BUILD.bazel",      // C/C++ Bazel
+		"meson.build",      // C/C++ Meson
+		"configure.ac",     // C/C++ Autotools
+		"configure.in",     // C/C++ Autotools
+		"SConstruct",       // C/C++ SCons
 	}
+
+	// Define maximum depth to prevent scanning too deep
+	const maxDepth = 4
+	rootDepth := strings.Count(repoPath, string(filepath.Separator))
 
 	err := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Continue walking
+		}
+
+		// Calculate current depth
+		currentDepth := strings.Count(path, string(filepath.Separator)) - rootDepth
+		if currentDepth > maxDepth {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		// Skip hidden directories and common build/cache directories
@@ -303,7 +341,11 @@ func autoDiscoverTargets(repoPath string) []string {
 				name == "vendor" ||
 				name == "target" ||
 				name == "build" ||
-				name == "__pycache__" {
+				name == "dist" ||
+				name == "__pycache__" ||
+				name == ".git" ||
+				name == ".svn" ||
+				name == ".hg" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -331,8 +373,22 @@ func autoDiscoverTargets(repoPath string) []string {
 		targets = append(targets, repoPath)
 	}
 
-	// Remove duplicates
-	return removeDuplicates(targets)
+	// Remove duplicates and sort by priority
+	targets = removeDuplicates(targets)
+	targets = sortTargetsByPriority(repoPath, targets)
+
+	if verbose {
+		log.Printf("Auto-discovered %d scan targets", len(targets))
+		for i, target := range targets {
+			relPath, _ := filepath.Rel(repoPath, target)
+			if relPath == "." {
+				relPath = "root"
+			}
+			log.Printf("  %d. %s", i+1, relPath)
+		}
+	}
+
+	return targets
 }
 
 // processScanTarget processes a single scan target
@@ -541,6 +597,130 @@ func generateSummaryReport(ctx *ScanContext) error {
 	return nil
 }
 
+// discoverWorkspaceTargets discovers targets from workspace configuration files
+func discoverWorkspaceTargets(repoPath string) []string {
+	var targets []string
+
+	// Check for common workspace configuration files
+	workspaceFiles := []string{
+		"workspace.yaml",      // Generic workspace
+		"lerna.json",          // Lerna monorepo
+		"nx.json",             // Nx monorepo
+		"rush.json",           // Rush monorepo
+		"pnpm-workspace.yaml", // PNPM workspace
+		"yarn.lock",           // Yarn workspace (check for workspaces in package.json)
+	}
+
+	for _, workspaceFile := range workspaceFiles {
+		workspacePath := filepath.Join(repoPath, workspaceFile)
+		if _, err := os.Stat(workspacePath); err == nil {
+			if verbose {
+				log.Printf("Found workspace file: %s", workspaceFile)
+			}
+
+			// Parse workspace configuration based on file type
+			switch workspaceFile {
+			case "package.json":
+				// Handle package.json with workspaces
+				targets = append(targets, parsePackageJsonWorkspaces(workspacePath)...)
+			case "lerna.json":
+				targets = append(targets, parseLernaWorkspaces(workspacePath)...)
+			case "pnpm-workspace.yaml":
+				targets = append(targets, parsePnpmWorkspaces(workspacePath)...)
+			default:
+				// For other workspace files, fall back to auto-discovery
+				continue
+			}
+		}
+	}
+
+	// Convert relative paths to absolute paths
+	var absoluteTargets []string
+	for _, target := range targets {
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(repoPath, target)
+		}
+		// Verify the target directory exists
+		if _, err := os.Stat(target); err == nil {
+			absoluteTargets = append(absoluteTargets, target)
+		}
+	}
+
+	return absoluteTargets
+}
+
+// parsePackageJsonWorkspaces parses package.json for workspace definitions
+func parsePackageJsonWorkspaces(packagePath string) []string {
+	// This is a simplified implementation
+	// In a real implementation, you would parse the JSON and extract workspace patterns
+	return []string{}
+}
+
+// parseLernaWorkspaces parses lerna.json for workspace definitions
+func parseLernaWorkspaces(lernaPath string) []string {
+	// This is a simplified implementation
+	// In a real implementation, you would parse the JSON and extract packages patterns
+	return []string{}
+}
+
+// parsePnpmWorkspaces parses pnpm-workspace.yaml for workspace definitions
+func parsePnpmWorkspaces(workspacePath string) []string {
+	// This is a simplified implementation
+	// In a real implementation, you would parse the YAML and extract packages patterns
+	return []string{}
+}
+
+// sortTargetsByPriority sorts targets by priority (root level first, then by depth)
+func sortTargetsByPriority(repoPath string, targets []string) []string {
+	// Create a map to store targets with their priority scores
+	type targetInfo struct {
+		path   string
+		depth  int
+		isRoot bool
+	}
+
+	var targetInfos []targetInfo
+	rootDepth := strings.Count(repoPath, string(filepath.Separator))
+
+	for _, target := range targets {
+		depth := strings.Count(target, string(filepath.Separator)) - rootDepth
+		isRoot := target == repoPath
+
+		targetInfos = append(targetInfos, targetInfo{
+			path:   target,
+			depth:  depth,
+			isRoot: isRoot,
+		})
+	}
+
+	// Sort by priority: root first, then by depth (shallower first)
+	for i := 0; i < len(targetInfos); i++ {
+		for j := i + 1; j < len(targetInfos); j++ {
+			// Root directories have highest priority
+			if targetInfos[i].isRoot && !targetInfos[j].isRoot {
+				continue
+			}
+			if !targetInfos[i].isRoot && targetInfos[j].isRoot {
+				targetInfos[i], targetInfos[j] = targetInfos[j], targetInfos[i]
+				continue
+			}
+
+			// Among non-root directories, prioritize by depth (shallower first)
+			if targetInfos[i].depth > targetInfos[j].depth {
+				targetInfos[i], targetInfos[j] = targetInfos[j], targetInfos[i]
+			}
+		}
+	}
+
+	// Extract sorted paths
+	var sortedTargets []string
+	for _, info := range targetInfos {
+		sortedTargets = append(sortedTargets, info.path)
+	}
+
+	return sortedTargets
+}
+
 // removeDuplicates removes duplicate strings from a slice
 func removeDuplicates(slice []string) []string {
 	keys := make(map[string]bool)
@@ -554,4 +734,60 @@ func removeDuplicates(slice []string) []string {
 	}
 
 	return result
+}
+
+// processTargetsSequentially processes targets one by one
+func processTargetsSequentially(ctx *ScanContext, targets []string) {
+	for i, target := range targets {
+		fmt.Printf("\n📦 Processing target %d/%d: %s\n", i+1, len(targets), target)
+
+		if err := processScanTarget(ctx, target); err != nil {
+			log.Printf("❌ Failed to process target %s: %v", target, err)
+			continue
+		}
+
+		fmt.Printf("✅ Completed target: %s\n", target)
+	}
+}
+
+// processTargetsInParallel processes multiple targets concurrently
+func processTargetsInParallel(ctx *ScanContext, targets []string) error {
+	// Limit concurrency to avoid overwhelming the system
+	const maxConcurrency = 3
+	semaphore := make(chan struct{}, maxConcurrency)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var errors []error
+
+	for i, target := range targets {
+		wg.Add(1)
+		go func(index int, targetPath string) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			fmt.Printf("\n📦 Processing target %d/%d: %s\n", index+1, len(targets), targetPath)
+
+			if err := processScanTarget(ctx, targetPath); err != nil {
+				mu.Lock()
+				errors = append(errors, fmt.Errorf("target %s: %w", targetPath, err))
+				mu.Unlock()
+				log.Printf("❌ Failed to process target %s: %v", targetPath, err)
+				return
+			}
+
+			fmt.Printf("✅ Completed target: %s\n", targetPath)
+		}(i, target)
+	}
+
+	wg.Wait()
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to process %d targets: %v", len(errors), errors)
+	}
+
+	return nil
 }
