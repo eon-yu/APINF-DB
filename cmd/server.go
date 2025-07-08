@@ -45,7 +45,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	defer database.Close()
 
 	// 웹 서버 생성
-	server := web.NewDashboardServer(database, serverPort)
+	server := web.NewServer(database, serverPort)
 
 	// Graceful shutdown 설정
 	c := make(chan os.Signal, 1)

@@ -2,7 +2,31 @@
 
 모노레포/MSA 환경에서 각 모듈의 오픈소스 라이브러리 의존성을 스캔하여 취약점과 라이선스 위반을 탐지하고 Slack으로 알림을 전송하는 종합적인 OSS 컴플라이언스 도구입니다.
 
-## 🏗️ 아키텍처
+## 목차
+- [🏗️ 아키텍처](#architecture)
+- [✨ 주요 기능](#features)
+- [🚀 빠른 시작](#quick-start)
+- [📖 사용 방법](#usage)
+- [🧪 테스트 환경](#test-environment)
+- [⚙️ 설정](#configuration)
+- [🏢 엔터프라이즈 배포](#enterprise-deployment)
+- [📊 지원 언어 및 패키지 매니저](#language-support)
+- [🔧 고급 사용법](#advanced-usage)
+- [📈 모니터링 및 메트릭](#monitoring)
+- [🔒 보안 고려사항](#security)
+- [🚨 문제 해결](#troubleshooting)
+- [🤝 기여하기](#contributing)
+- [📄 라이선스](#license)
+- [🆘 지원 및 문의](#support)
+- [🔄 업데이트 로드맵](#roadmap)
+- [📊 성능 벤치마크](#benchmark)
+- [🗄️ 데이터베이스 마이그레이션](#migration)
+
+---
+
+<a id="architecture"></a>
+<details markdown="1">
+<summary>🏗️ 아키텍처</summary>
 
 ```mermaid
 graph TB
@@ -22,7 +46,11 @@ graph TB
     M[Multi-Tenant Manager] --> E
 ```
 
-## ✨ 주요 기능
+</details>
+
+<a id="features"></a>
+<details markdown="1">
+<summary>✨ 주요 기능</summary>
 
 ### 🔍 **OSS 스캔 및 분석**
 - **SBOM 생성**: Syft를 이용한 Software Bill of Materials 자동 생성
@@ -59,7 +87,11 @@ graph TB
 - **Docker/Kubernetes**: 컨테이너 환경 완전 지원
 - **모니터링**: Prometheus/Grafana 메트릭 제공
 
-## 🚀 빠른 시작
+</details>
+
+<a id="quick-start"></a>
+<details markdown="1">
+<summary>🚀 빠른 시작</summary>
 
 ### 1. 사전 요구사항
 
@@ -120,7 +152,11 @@ vi .oss-compliance-scanner.yaml
 sqlite3 db/oss_scan.db < db/schema.sql
 ```
 
-## 📖 사용 방법
+</details>
+
+<a id="usage"></a>
+<details markdown="1">
+<summary>📖 사용 방법</summary>
 
 ### CLI 스캔
 
@@ -176,7 +212,11 @@ curl -X POST http://localhost:8080/api/v1/scan/start \
   -d '{"repo_path": "/path/to/repo", "repo_name": "my-project", "scan_type": "both"}'
 ```
 
-## 🧪 테스트 환경
+</details>
+
+<a id="test-environment"></a>
+<details markdown="1">
+<summary>🧪 테스트 환경</summary>
 
 테스트를 위한 샘플 프로젝트들이 `test-projects/` 디렉토리에 준비되어 있습니다:
 
@@ -196,7 +236,11 @@ cd test-projects
 - **cpp-app/**: **C/C++ 취약점 테스트용 (OpenSSL, libcurl 등)**
 - **multi-module/**: 멀티 모듈 프로젝트 테스트용
 
-## ⚙️ 설정
+</details>
+
+<a id="configuration"></a>
+<details markdown="1">
+<summary>⚙️ 설정</summary>
 
 ### 기본 설정 (.oss-compliance-scanner.yaml)
 
@@ -265,7 +309,11 @@ rules:
       grace_period_days: 7
 ```
 
-## 🏢 엔터프라이즈 배포
+</details>
+
+<a id="enterprise-deployment"></a>
+<details markdown="1">
+<summary>🏢 엔터프라이즈 배포</summary>
 
 ### Docker 배포
 
@@ -287,7 +335,11 @@ cp k8s.yaml.sample k8s.yaml
 kubectl apply -f k8s.yaml
 ```
 
-## 📊 지원 언어 및 패키지 매니저
+</details>
+
+<a id="language-support"></a>
+<details markdown="1">
+<summary>📊 지원 언어 및 패키지 매니저</summary>
 
 | 언어 | 패키지 매니저 | 지원 상태 | 테스트 프로젝트 |
 |------|--------------|----------|----------------|
@@ -314,7 +366,11 @@ kubectl apply -f k8s.yaml
 | **SCons** | SConstruct | Python 기반 빌드 도구 |
 | **Make** | Makefile | 전통적인 빌드 도구 |
 
-## 🔧 고급 사용법
+</details>
+
+<a id="advanced-usage"></a>
+<details markdown="1">
+<summary>🔧 고급 사용법</summary>
 
 ### 멀티 모듈 스캔
 
@@ -374,7 +430,11 @@ curl -X POST http://localhost:8080/api/v1/policies/vulnerability \
   -d '{"severity": "critical", "action": "fail", "grace_period_days": 7}'
 ```
 
-## 📈 모니터링 및 메트릭
+</details>
+
+<a id="monitoring"></a>
+<details markdown="1">
+<summary>📈 모니터링 및 메트릭</summary>
 
 ### Prometheus 메트릭
 
@@ -398,7 +458,11 @@ tail -f logs/oss-compliance.log
 export OSS_SCANNER_LOG_FORMAT=json
 ```
 
-## 🔒 보안 고려사항
+</details>
+
+<a id="security"></a>
+<details markdown="1">
+<summary>🔒 보안 고려사항</summary>
 
 - **인증**: API 키 기반 인증 지원
 - **HTTPS**: TLS 인증서 설정 권장
@@ -406,7 +470,11 @@ export OSS_SCANNER_LOG_FORMAT=json
 - **접근 제어**: IP 화이트리스트 및 역할 기반 접근 제어
 - **스캔 격리**: 각 스캔 작업의 독립적인 실행 환경
 
-## 🚨 문제 해결
+</details>
+
+<a id="troubleshooting"></a>
+<details markdown="1">
+<summary>🚨 문제 해결</summary>
 
 ### 일반적인 문제들
 
@@ -435,13 +503,17 @@ ls CMakeLists.txt conanfile.txt vcpkg.json BUILD meson.build
 ./oss-compliance-scanner scan --repo /path/to/cpp-project --language cpp
 ```
 
-## 🤝 기여하기
+</details>
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+<a id="contributing"></a>
+<details markdown="1">
+<summary>🤝 기여하기</summary>
+
+1. Fork the Project  
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)  
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)  
+4. Push to the Branch (`git push origin feature/AmazingFeature`)  
+5. Open a Pull Request  
 
 ### 개발 가이드라인
 
@@ -449,18 +521,30 @@ ls CMakeLists.txt conanfile.txt vcpkg.json BUILD meson.build
 - 웹 UI 개선 시 모바일 반응형 디자인 고려
 - 데이터베이스 스키마 변경 시 마이그레이션 스크립트 제공
 
-## 📄 라이선스
+</details>
+
+<a id="license"></a>
+<details markdown="1">
+<summary>📄 라이선스</summary>
 
 이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
 
-## 🆘 지원 및 문의
+</details>
 
-- **이슈 리포트**: GitHub Issues를 통해 버그 신고
-- **기능 요청**: GitHub Discussions에서 기능 제안
-- **문서**: [위키 페이지](wiki-url) 참조
-- **이메일**: support@company.com
+<a id="support"></a>
+<details markdown="1">
+<summary>🆘 지원 및 문의</summary>
 
-## 🔄 업데이트 로드맵
+- **이슈 리포트**: GitHub Issues를 통해 버그 신고  
+- **기능 요청**: GitHub Discussions에서 기능 제안  
+- **문서**: [위키 페이지](wiki-url) 참조  
+- **이메일**: support@company.com  
+
+</details>
+
+<a id="roadmap"></a>
+<details markdown="1">
+<summary>🔄 업데이트 로드맵</summary>
 
 ### v1.2.0 (현재)
 - ✅ C/C++ 프로젝트 지원 추가
@@ -481,7 +565,11 @@ ls CMakeLists.txt conanfile.txt vcpkg.json BUILD meson.build
 - [ ] SSO 통합 (SAML, OIDC)
 - [ ] 컨테이너 이미지 스캔
 
-## 📊 성능 벤치마크
+</details>
+
+<a id="benchmark"></a>
+<details markdown="1">
+<summary>📊 성능 벤치마크</summary>
 
 ### 스캔 성능 (테스트 환경 기준)
 
@@ -498,7 +586,11 @@ ls CMakeLists.txt conanfile.txt vcpkg.json BUILD meson.build
 
 **Made with ❤️ for Open Source Security**
 
-## 🗄️ 데이터베이스 마이그레이션
+</details>
+
+<a id="migration"></a>
+<details markdown="1">
+<summary>🗄️ 데이터베이스 마이그레이션</summary>
 
 OSS Compliance Scanner는 체계적인 데이터베이스 스키마 관리를 위한 마이그레이션 시스템을 제공합니다.
 
@@ -530,17 +622,19 @@ XXX_description.sql
 
 기존 설치에서 새 버전으로 업그레이드할 때:
 
-1. 애플리케이션을 중지합니다
-2. 데이터베이스를 백업합니다
-3. 마이그레이션을 실행합니다:
+1. 애플리케이션을 중지합니다  
+2. 데이터베이스를 백업합니다  
+3. 마이그레이션을 실행합니다:  
    ```bash
    ./oss-compliance-scanner migrate up
-   ```
-4. 애플리케이션을 재시작합니다
+   ```  
+4. 애플리케이션을 재시작합니다  
 
 ### 마이그레이션 히스토리
 
-- **v1.0.0 (마이그레이션 001)**: 초기 데이터베이스 스키마
-- **v1.1.0 (마이그레이션 002)**: 멀티 테넌트 지원 추가
-- **v1.2.0 (마이그레이션 003)**: C/C++ 지원 및 웹 UI 개선
+- **v1.0.0 (마이그레이션 001)**: 초기 데이터베이스 스키마  
+- **v1.1.0 (마이그레이션 002)**: 멀티 테넌트 지원 추가  
+- **v1.2.0 (마이그레이션 003)**: C/C++ 지원 및 웹 UI 개선  
+
+</details>
 

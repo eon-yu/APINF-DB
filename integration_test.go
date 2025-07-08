@@ -27,7 +27,7 @@ import (
 // APIIntegrationTestSuite contains all API integration tests
 type APIIntegrationTestSuite struct {
 	suite.Suite
-	server   *web.DashboardServer
+	server   *web.AppServer
 	database *db.Database
 	baseURL  string
 	cleanup  func()
@@ -70,7 +70,7 @@ func (suite *APIIntegrationTestSuite) SetupSuite() {
 	os.Chdir(tempDir)
 
 	// Create web server
-	server := web.NewDashboardServer(database, "0") // Use port 0 for random available port
+	server := web.NewServer(database, "0") // Use port 0 for random available port
 
 	suite.server = server
 	suite.database = database
