@@ -183,8 +183,8 @@ kill -9 <PID>
 #### 4. 데이터베이스 문제
 ```bash
 # 데이터베이스 재초기화
-rm db/oss_scan.db
-sqlite3 db/oss_scan.db < db/schema.sql
+rm oss_scan.db
+sqlite3 oss_scan.db < db/init.sql
 ```
 
 ### 로그 확인
@@ -200,7 +200,7 @@ tail -f logs/server.log
 ## 🔗 추가 리소스
 
 - **전체 문서**: [README.md](README.md)
-- **데이터베이스 스키마**: [db/schema.sql](db/schema.sql)
+- **데이터베이스 스키마**: [db/init.sql](db/init.sql)
 - **설정 예제**: [.oss-compliance-scanner.yaml.sample](.oss-compliance-scanner.yaml.sample)
 - **테스트 스크립트**: [test-projects/run-tests.sh](test-projects/run-tests.sh)
 

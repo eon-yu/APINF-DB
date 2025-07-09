@@ -1,4 +1,4 @@
--- Migration: 001_initial_schema.sql
+-- Migration: 001_initial_init.sql
 -- Description: Initial database schema for OSS Compliance Scanner
 -- Version: 1.0.0
 -- Date: 2024-12-19

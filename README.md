@@ -149,7 +149,7 @@ vi .oss-compliance-scanner.yaml
 
 ```bash
 # SQLite 데이터베이스 스키마 생성
-sqlite3 db/oss_scan.db < db/schema.sql
+sqlite3 oss_scan.db < db/init.sql
 ```
 
 </details>
@@ -247,7 +247,7 @@ cd test-projects
 ```yaml
 database:
   driver: sqlite3
-  path: ./db/oss_scan.db
+  path: ./oss_scan.db
 
 scanner:
   syft_path: syft

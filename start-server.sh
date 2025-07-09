@@ -79,7 +79,7 @@ check_binary() {
 
 # 데이터베이스 마이그레이션 실행
 check_database() {
-    local db_path="$SCRIPT_DIR/db/oss_scan.db"
+    local db_path="$SCRIPT_DIR/oss_scan.db"
     local migrations_dir="$SCRIPT_DIR/db/migrations"
     
     # 데이터베이스 디렉토리 생성

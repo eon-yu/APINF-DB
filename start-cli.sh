@@ -92,8 +92,8 @@ check_dependencies() {
 
 # 데이터베이스 초기화 확인
 check_database() {
-    local db_path="$SCRIPT_DIR/db/oss_scan.db"
-    local schema_path="$SCRIPT_DIR/db/schema.sql"
+    local db_path="$SCRIPT_DIR/oss_scan.db"
+    local schema_path="$SCRIPT_DIR/db/init.sql"
     
     if [ ! -f "$db_path" ]; then
         if [ -f "$schema_path" ]; then
@@ -221,7 +221,7 @@ run_scan() {
         echo ""
         echo -e "${YELLOW}💡 다음 단계:${NC}"
         echo "   1. 웹 대시보드에서 결과 확인: ./start-server.sh"
-        echo "   2. 데이터베이스 직접 조회: sqlite3 db/oss_scan.db"
+        echo "   2. 데이터베이스 직접 조회: sqlite3 oss_scan.db"
         echo "   3. 정책 설정 조정: vi .oss-compliance-scanner.yaml"
     else
         echo ""

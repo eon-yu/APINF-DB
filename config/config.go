@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,34 +21,6 @@ type Config struct {
 	Policy       models.PolicyConfig         `yaml:"policy" mapstructure:"policy"`
 	Notification models.NotificationSettings `yaml:"notification" mapstructure:"notification"`
 	Logging      LoggingConfig               `yaml:"logging" mapstructure:"logging"`
-}
-
-// DatabaseConfig represents database configuration
-type DatabaseConfig struct {
-	Driver   string `yaml:"driver" mapstructure:"driver"`
-	Path     string `yaml:"path" mapstructure:"path"`
-	Host     string `yaml:"host" mapstructure:"host"`
-	Port     int    `yaml:"port" mapstructure:"port"`
-	Username string `yaml:"username" mapstructure:"username"`
-	Password string `yaml:"password" mapstructure:"password"`
-	Name     string `yaml:"name" mapstructure:"name"`
-	SSLMode  string `yaml:"ssl_mode" mapstructure:"ssl_mode"`
-}
-
-// GetDSN returns the data source name for the database connection
-func (dc *DatabaseConfig) GetDSN() string {
-	switch dc.Driver {
-	case "sqlite3":
-		return dc.Path
-	case "postgres":
-		return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-			dc.Host, dc.Port, dc.Username, dc.Password, dc.Name, dc.SSLMode)
-	case "mysql":
-		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
-			dc.Username, dc.Password, dc.Host, dc.Port, dc.Name)
-	default:
-		return dc.Path // fallback to path for SQLite
-	}
 }
 
 // ScannerConfig represents scanner tool configuration
@@ -71,12 +44,49 @@ type LoggingConfig struct {
 	MaxAge     int    `yaml:"max_age" mapstructure:"max_age"`
 }
 
-var (
-	defaultConfig *Config
-)
+// DatabaseConfig represents database configuration
+type DatabaseConfig struct {
+	Driver   string `yaml:"driver" mapstructure:"driver"`
+	Path     string `yaml:"path" mapstructure:"path"`
+	Host     string `yaml:"host" mapstructure:"host"`
+	Port     int    `yaml:"port" mapstructure:"port"`
+	Username string `yaml:"username" mapstructure:"username"`
+	Password string `yaml:"password" mapstructure:"password"`
+	Name     string `yaml:"name" mapstructure:"name"`
+	SSLMode  string `yaml:"ssl_mode" mapstructure:"ssl_mode"`
+}
+
+var config *Config = nil
+
+func GetConfig() *Config {
+	if config == nil {
+		err := LoadConfig(os.Getenv("OSS_SCANNER_CONFIG_PATH"))
+		if err != nil {
+			log.Fatal("Failed to load config:", err)
+			return getMinimalConfig()
+		}
+	}
+	return config
+}
+
+// GetDSN returns the data source name for the database connection
+func (dc *DatabaseConfig) GetDSN() string {
+	switch dc.Driver {
+	case "sqlite3":
+		return dc.Path
+	case "postgres":
+		return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+			dc.Host, dc.Port, dc.Username, dc.Password, dc.Name, dc.SSLMode)
+	case "mysql":
+		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
+			dc.Username, dc.Password, dc.Host, dc.Port, dc.Name)
+	default:
+		return dc.Path // fallback to path for SQLite
+	}
+}
 
 // LoadConfig loads configuration from file and environment variables
-func LoadConfig(configPath string) (*Config, error) {
+func LoadConfig(configPath string) error {
 	// Set default values
 	setDefaults()
 
@@ -95,7 +105,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Read config file
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+			return fmt.Errorf("failed to read config file: %w", err)
 		}
 		// Config file not found, use defaults and environment variables
 	}
@@ -106,39 +116,25 @@ func LoadConfig(configPath string) (*Config, error) {
 	viper.AutomaticEnv()
 
 	// Unmarshal config
-	config := &Config{}
-	if err := viper.Unmarshal(config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	loadConfig := &Config{}
+	if err := viper.Unmarshal(loadConfig); err != nil {
+		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
 	// Validate and set defaults for computed values
-	if err := validateAndSetDefaults(config); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
+	if err := validateAndSetDefaults(loadConfig); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	defaultConfig = config
-	return config, nil
-}
-
-// GetConfig returns the default configuration instance
-func GetConfig() *Config {
-	if defaultConfig == nil {
-		// Load with default values if not initialized
-		config, err := LoadConfig("")
-		if err != nil {
-			// Return minimal config with defaults
-			return getMinimalConfig()
-		}
-		return config
-	}
-	return defaultConfig
+	config = loadConfig
+	return nil
 }
 
 // setDefaults sets default configuration values
 func setDefaults() {
 	// Database defaults
 	viper.SetDefault("database.driver", "sqlite3")
-	viper.SetDefault("database.path", "./db/oss_scan.db")
+	viper.SetDefault("database.path", "./oss_scan.db")
 
 	// Scanner defaults
 	viper.SetDefault("scanner.syft_path", "syft")
@@ -237,7 +233,7 @@ func getMinimalConfig() *Config {
 	return &Config{
 		Database: DatabaseConfig{
 			Driver: "sqlite3",
-			Path:   "./db/oss_scan.db",
+			Path:   "./oss_scan.db",
 		},
 		Scanner: ScannerConfig{
 			SyftPath:         "syft",

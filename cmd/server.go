@@ -32,10 +32,7 @@ func init() {
 
 func runServer(cmd *cobra.Command, args []string) {
 	// 설정 로드
-	cfg, err := config.LoadConfig("")
-	if err != nil {
-		log.Fatal("Failed to load config:", err)
-	}
+	cfg := config.GetConfig()
 
 	// 데이터베이스 연결
 	database, err := db.NewDatabase(cfg.Database.Driver, cfg.Database.GetDSN())

@@ -20,7 +20,7 @@ oss-compliance-scanner.exe
 go.work
 
 # Database files
-db/oss_scan.db
+oss_scan.db
 db/*.db
 *.db
 

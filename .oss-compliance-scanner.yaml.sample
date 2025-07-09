@@ -6,7 +6,7 @@ database:
   # Database driver: sqlite3, postgres, mysql
   driver: sqlite3
   # For SQLite
-  path: ./db/oss_scan.db
+  path: ./oss_scan.db
   # For PostgreSQL/MySQL (uncomment and configure as needed)
   # host: localhost
   # port: 5432

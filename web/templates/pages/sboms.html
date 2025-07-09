@@ -375,7 +375,7 @@
                             <div class="mb-3">
                                 <label for="scanType" class="form-label">스캔 타입</label>
                                 <select class="form-select" id="scanType">
-                                    <option value="full">전체 스캔 (SBOM + 취약점)</option>
+                                    <option value="both">전체 스캔 (SBOM + 취약점)</option>
                                     <option value="sbom">SBOM만 생성</option>
                                     <option value="vuln">취약점만 스캔</option>
                                 </select>
@@ -553,7 +553,7 @@ async function startNewScan() {
     }
     
     try {
-        const response = await fetch('/api/v1/scans', {
+        const response = await fetch('/api/v1/scan/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

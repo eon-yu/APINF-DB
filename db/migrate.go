@@ -88,7 +88,7 @@ func (m *MigrationManager) LoadMigrations() ([]Migration, error) {
 			return nil, fmt.Errorf("failed to read migration file %s: %v", file, err)
 		}
 
-		// Extract version from filename (e.g., 001_initial_schema.sql -> 001)
+		// Extract version from filename (e.g., 001_initial_init.sql -> 001)
 		filename := filepath.Base(file)
 		parts := strings.Split(filename, "_")
 		if len(parts) < 2 {
