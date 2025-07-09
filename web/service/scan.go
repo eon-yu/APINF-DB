@@ -1,17 +1,12 @@
 package service
 
 import (
-	"context"
 	"fmt"
-	"log"
 	"oss-compliance-scanner/db"
 	"oss-compliance-scanner/models"
-	"path/filepath"
 	"strconv"
 	"time"
 
-	"oss-compliance-scanner/config"
-	"oss-compliance-scanner/scanner"
 	"oss-compliance-scanner/util"
 
 	"github.com/gofiber/fiber/v2"
@@ -60,7 +55,7 @@ func (ds *ScanService) HandleAPIStartScan(c *fiber.Ctx) error {
 			SkipSBOM:   false,
 			SkipVuln:   false,
 			Notify:     true,
-			Verbose:    true,
+			Verbose:    false,
 		})
 	}()
 
@@ -111,7 +106,14 @@ func (ds *ScanService) HandleAPIRescanSBOM(c *fiber.Ctx) error {
 	go func() {
 		// Note: RepoPath is not stored in SBOM model, using empty string for now
 		// In production, this should be stored separately or added to SBOM model
-		ds.executeScan(scanID, "", sbom.RepoName, sbom.ModulePath, "both")
+		util.ExecuteScan(&util.ScanContext{
+			RepoPath:   sbom.RepoName,
+			ModulePath: sbom.ModulePath,
+			SkipSBOM:   false,
+			SkipVuln:   false,
+			Notify:     true,
+			Verbose:    false,
+		})
 	}()
 
 	return c.JSON(fiber.Map{
@@ -163,7 +165,14 @@ func (ds *ScanService) HandleAPIRescanRepository(c *fiber.Ctx) error {
 
 		// Start background rescan process for this module
 		go func(id, repo, module string) {
-			ds.executeScan(id, "", repo, module, "both")
+			util.ExecuteScan(&util.ScanContext{
+				RepoPath:   repo,
+				ModulePath: module,
+				SkipSBOM:   false,
+				SkipVuln:   false,
+				Notify:     true,
+				Verbose:    false,
+			})
 		}(scanID, sbom.RepoName, sbom.ModulePath)
 	}
 
@@ -192,147 +201,6 @@ func getModulePathsFromMap(moduleMap map[string]*models.SBOM) []string {
 		paths = append(paths, path)
 	}
 	return paths
-}
-
-// executeScan simulates the actual scan execution
-func (ds *ScanService) executeScan(scanID, repoPath, repoName, modulePath, scanType string) {
-	// Use Background context for tool executions
-	ctx := context.Background()
-
-	// Resolve target path – if modulePath is provided join with repoPath
-	var targetPath string
-	if repoPath != "" {
-		targetPath = repoPath
-		if modulePath != "" {
-			targetPath = filepath.Join(repoPath, modulePath)
-		}
-	}
-
-	startTime := time.Now()
-	log.Printf("[%s] ▶️  Scan started – repo:%s module:%s path:%s", scanID, repoName, modulePath, targetPath)
-
-	// Load configuration (defaults if no file)
-	cfg := config.GetConfig()
-
-	// Initialize scanners
-	syftScanner := scanner.NewSyftScanner(cfg.Scanner.SyftPath, cfg.Scanner.TempDir, cfg.Scanner.CacheDir, cfg.Scanner.TimeoutSeconds)
-	grypeScanner := scanner.NewGrypeScanner(cfg.Scanner.GrypePath, cfg.Scanner.TempDir, cfg.Scanner.CacheDir, cfg.Scanner.TimeoutSeconds)
-
-	var (
-		sbom            *models.SBOM
-		components      []*models.Component
-		vulnerabilities []*models.Vulnerability
-	)
-
-	// 1️⃣ SBOM generation ------------------------------------------------------
-	if scanType == "sbom" || scanType == "both" {
-		if targetPath == "" {
-			log.Printf("[%s] ⚠️  No repo path provided – skipping SBOM generation", scanID)
-		} else {
-			var err error
-			sbom, err = syftScanner.GenerateSBOM(ctx, targetPath, nil)
-			if err != nil {
-				log.Printf("[%s] ❌ SBOM generation failed: %v", scanID, err)
-			} else {
-				sbom.RepoName = repoName
-				sbom.ModulePath = modulePath
-				// Persist SBOM
-				if err := ds.database.CreateSBOM(sbom); err != nil {
-					log.Printf("[%s] ❌ Failed to store SBOM: %v", scanID, err)
-				}
-
-				// Parse & store components
-				components, err = syftScanner.ParseSBOMToComponents(sbom)
-				if err != nil {
-					log.Printf("[%s] ⚠️  Failed to parse components: %v", scanID, err)
-				} else {
-					for _, comp := range components {
-						if err := ds.database.CreateComponent(comp); err != nil {
-							log.Printf("[%s] ⚠️  Failed to store component %s@%s: %v", scanID, comp.Name, comp.Version, err)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 2️⃣ Vulnerability scanning ----------------------------------------------
-	if scanType == "vuln" || scanType == "both" {
-		if targetPath == "" {
-			log.Printf("[%s] ⚠️  No repo path provided – skipping vulnerability scan", scanID)
-		} else {
-			var err error
-			vulnerabilities, err = grypeScanner.ScanDirectory(ctx, targetPath, nil)
-			if err != nil {
-				log.Printf("[%s] ❌ Vulnerability scan failed: %v", scanID, err)
-			} else {
-				// Build component lookup for mapping (name@version -> ID)
-				compLookup := make(map[string]int)
-				for _, comp := range components {
-					key := fmt.Sprintf("%s@%s", comp.Name, comp.Version)
-					compLookup[key] = comp.ID
-				}
-
-				for _, vuln := range vulnerabilities {
-					// Map to component via artifact metadata if possible
-					art, ok := vuln.Metadata["artifact"].(map[string]any)
-					if ok {
-						name, _ := art["name"].(string)
-						version, _ := art["version"].(string)
-						if name != "" && version != "" {
-							if id, ok := compLookup[fmt.Sprintf("%s@%s", name, version)]; ok {
-								vuln.ComponentID = id
-							}
-						}
-					}
-
-					if vuln.ComponentID == 0 {
-						// Could not map – skip storing to maintain referential integrity
-						continue
-					}
-
-					if err := ds.database.CreateVulnerability(vuln); err != nil {
-						log.Printf("[%s] ⚠️  Failed to store vulnerability %s: %v", scanID, vuln.VulnID, err)
-					}
-				}
-			}
-		}
-	}
-
-	// 3️⃣ Store scan result ----------------------------------------------------
-	endTime := time.Now()
-	result := &models.ScanResult{
-		SBOMID:               0,
-		RepoName:             repoName,
-		ModulePath:           modulePath,
-		ScanStartTime:        startTime,
-		ScanEndTime:          endTime,
-		Status:               models.ScanStatusCompleted,
-		TotalComponents:      len(components),
-		VulnerabilitiesFound: len(vulnerabilities),
-	}
-
-	if sbom != nil {
-		result.SBOMID = sbom.ID
-	}
-
-	// Count severities
-	if len(vulnerabilities) > 0 {
-		sevCounts := grypeScanner.CountVulnerabilitiesBySeverity(vulnerabilities)
-		result.CriticalVulns = sevCounts["Critical"]
-		result.HighVulns = sevCounts["High"]
-		result.MediumVulns = sevCounts["Medium"]
-		result.LowVulns = sevCounts["Low"]
-	}
-
-	result.OverallRisk = result.CalculateOverallRisk()
-
-	if err := ds.database.CreateScanResult(result); err != nil {
-		log.Printf("[%s] ⚠️  Failed to store scan_result: %v", scanID, err)
-	}
-
-	log.Printf("[%s] ✅ Scan completed (components:%d vulns:%d)", scanID, len(components), len(vulnerabilities))
-
 }
 
 func (ds *ScanService) HandleAPIScanResults(c *fiber.Ctx) error {

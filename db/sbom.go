@@ -10,13 +10,13 @@ import (
 
 // CreateSBOM creates a new SBOM record
 func (db *Database) CreateSBOM(sbom *models.SBOM) error {
-	return db.orm.Create(sbom).Error
+	return db.orm.Model(&models.SBOM{}).Create(&sbom).Error
 }
 
 // GetSBOM retrieves an SBOM by ID
 func (db *Database) GetSBOM(id int) (*models.SBOM, error) {
 	sbom := &models.SBOM{}
-	err := db.orm.Where("id = ?", id).First(sbom).Error
+	err := db.orm.Where("id = ?", id).First(&sbom).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("SBOM not found with ID %d", id)
@@ -30,7 +30,7 @@ func (db *Database) GetSBOM(id int) (*models.SBOM, error) {
 // GetLatestSBOM retrieves the latest SBOM for a repo/module
 func (db *Database) GetLatestSBOM(repoName, modulePath string) (*models.SBOM, error) {
 	sbom := &models.SBOM{}
-	err := db.orm.Where("repo_name = ? AND module_path = ?", repoName, modulePath).Order("scan_date DESC").First(sbom).Error
+	err := db.orm.Where("repo_name = ? AND module_path = ?", repoName, modulePath).Order("scan_date DESC").First(&sbom).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("no SBOM found for %s/%s", repoName, modulePath)
@@ -66,7 +66,7 @@ func (db *Database) CreateComponent(component *models.Component) error {
 	if err := component.MarshalComponentFields(); err != nil {
 		return fmt.Errorf("failed to marshal component fields: %w", err)
 	}
-	db.orm.Create(component)
+	db.orm.Create(&component)
 	return nil
 }
 
@@ -83,7 +83,7 @@ func (db *Database) GetComponentsBySBOM(sbomID int) ([]*models.Component, error)
 // GetComponent retrieves a specific component by ID
 func (db *Database) GetComponent(componentID int) (*models.Component, error) {
 	component := &models.Component{}
-	err := db.orm.Where("id = ?", componentID).First(component).Error
+	err := db.orm.Where("id = ?", componentID).First(&component).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("component not found with ID %d", componentID)
@@ -95,8 +95,8 @@ func (db *Database) GetComponent(componentID int) (*models.Component, error) {
 }
 
 // UpdateSBOMComponentCount updates the component_count field for an SBOM
-func (db *Database) UpdateSBOMComponentCount(sbomID int) error {
-	db.orm.Model(&models.SBOM{}).Where("id = ?", sbomID).Update("component_count", gorm.Expr("(SELECT COUNT(*) FROM components WHERE sbom_id = ?)", sbomID))
+func (db *Database) UpdateSBOMComponentCount(sbomID, componentCount int) error {
+	db.orm.Model(&models.SBOM{}).Where("id = ?", sbomID).Update("component_count", componentCount)
 	return nil
 }
 

@@ -327,7 +327,9 @@ func processScanTarget(ctx *ScanContext, targetPath string) error {
 		}
 
 		// Update component count
-		sbomRecord.ComponentCount = len(components)
+		if err := ctx.Database.UpdateSBOMComponentCount(sbomRecord.ID, len(components)); err != nil {
+			return fmt.Errorf("failed to update SBOM component count: %w", err)
+		}
 
 		// Save components to database
 		for _, comp := range components {

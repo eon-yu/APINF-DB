@@ -7,7 +7,7 @@ import (
 
 // CreateScanResult creates a new scan result record
 func (db *Database) CreateScanResult(result *models.ScanResult) error {
-	err := db.orm.Model(&models.ScanResult{}).Create(result).Error
+	err := db.orm.Model(&models.ScanResult{}).Create(&result).Error
 	if err != nil {
 		return fmt.Errorf("failed to create scan result: %w", err)
 	}
