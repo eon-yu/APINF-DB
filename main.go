@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"oss-compliance-scanner/cmd"
+	"oss-compliance-scanner/config"
+	"oss-compliance-scanner/logging"
 )
 
 var (
@@ -16,7 +18,12 @@ var (
 
 func main() {
 	// Set up logging
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	cfg := config.GetConfig()
+	if err := logging.Init(cfg.Logging); err != nil {
+		// Fallback to default stderr logging if initialization fails
+		log.Printf("Logging initialization failed: %v", err)
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
+	}
 
 	// Execute the root command
 	if err := cmd.Execute(version, commit, date); err != nil {

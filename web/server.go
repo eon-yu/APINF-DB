@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"net/http"
 
+	"oss-compliance-scanner/config"
 	"oss-compliance-scanner/db"
+	"oss-compliance-scanner/logging"
 	"oss-compliance-scanner/models"
 	"oss-compliance-scanner/web/service"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
+	fiberlogger "github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/template/html/v2"
 )
@@ -45,6 +47,10 @@ type ModuleInfo struct {
 
 // NewAppServer creates a new dashboard server instance
 func NewAppServer(database *db.Database, port string) *AppServer {
+	// Ensure global logging is initialized (use default config if necessary)
+	cfg := config.GetConfig()
+	_ = logging.Init(cfg.Logging)
+
 	// HTML template engine
 	engine := html.New("./web/templates", ".html")
 	engine.Reload(true) // Optional. Default: false
@@ -58,7 +64,7 @@ func NewAppServer(database *db.Database, port string) *AppServer {
 
 	// Middleware
 	app.Use(recover.New())
-	app.Use(logger.New())
+	app.Use(fiberlogger.New())
 	app.Use(cors.New())
 
 	server := &AppServer{
@@ -69,6 +75,11 @@ func NewAppServer(database *db.Database, port string) *AppServer {
 
 	server.setupRoutes()
 	return server
+}
+
+// NewServer is kept for backward compatibility; it simply delegates to NewAppServer.
+func NewServer(database *db.Database, port string) *AppServer {
+	return NewAppServer(database, port)
 }
 
 // setupRoutes configures all web routes
