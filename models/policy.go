@@ -17,45 +17,45 @@ const (
 
 // LicensePolicy represents license compliance policy
 type LicensePolicy struct {
-	ID          int          `json:"id" db:"id"`
-	LicenseName string       `json:"license_name" db:"license_name"`
-	Action      PolicyAction `json:"action" db:"action"`
-	Reason      string       `json:"reason" db:"reason"`
-	IsActive    bool         `json:"is_active" db:"is_active"`
-	CreatedAt   time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at" db:"updated_at"`
+	ID          int          `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	LicenseName string       `json:"license_name" gorm:"column:license_name"`
+	Action      PolicyAction `json:"action" gorm:"column:action"`
+	Reason      string       `json:"reason" gorm:"column:reason"`
+	IsActive    bool         `json:"is_active" gorm:"column:is_active"`
+	CreatedAt   time.Time    `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt   time.Time    `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // VulnerabilityPolicy represents vulnerability policy settings
 type VulnerabilityPolicy struct {
-	ID                 int          `json:"id" db:"id"`
-	MinSeverityLevel   string       `json:"min_severity_level" db:"min_severity_level"`
-	MaxCVSSScore       float64      `json:"max_cvss_score" db:"max_cvss_score"`
-	Action             PolicyAction `json:"action" db:"action"`
-	IgnoreFixAvailable bool         `json:"ignore_fix_available" db:"ignore_fix_available"`
-	GracePeriodDays    int          `json:"grace_period_days" db:"grace_period_days"`
-	IsActive           bool         `json:"is_active" db:"is_active"`
-	CreatedAt          time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt          time.Time    `json:"updated_at" db:"updated_at"`
+	ID                 int          `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	MinSeverityLevel   string       `json:"min_severity_level" gorm:"column:min_severity_level"`
+	MaxCVSSScore       float64      `json:"max_cvss_score" gorm:"column:max_cvss_score"`
+	Action             PolicyAction `json:"action" gorm:"column:action"`
+	IgnoreFixAvailable bool         `json:"ignore_fix_available" gorm:"column:ignore_fix_available"`
+	GracePeriodDays    int          `json:"grace_period_days" gorm:"column:grace_period_days"`
+	IsActive           bool         `json:"is_active" gorm:"column:is_active"`
+	CreatedAt          time.Time    `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt          time.Time    `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // PolicyViolation represents a policy violation found during scan
 type PolicyViolation struct {
-	ID                int                    `json:"id" db:"id"`
-	SBOMID            int                    `json:"sbom_id" db:"sbom_id"`
-	ComponentID       int                    `json:"component_id" db:"component_id"`
-	VulnerabilityID   *int                   `json:"vulnerability_id" db:"vulnerability_id"`
-	ViolationType     ViolationType          `json:"violation_type" db:"violation_type"`
-	Severity          string                 `json:"severity" db:"severity"`
-	PolicyID          int                    `json:"policy_id" db:"policy_id"`
-	Description       string                 `json:"description" db:"description"`
-	RecommendedAction string                 `json:"recommended_action" db:"recommended_action"`
-	Status            ViolationStatus        `json:"status" db:"status"`
-	Metadata          map[string]interface{} `json:"metadata" db:"-"`
-	MetadataJSON      string                 `json:"-" db:"metadata_json"`
-	CreatedAt         time.Time              `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at" db:"updated_at"`
-	ResolvedAt        *time.Time             `json:"resolved_at" db:"resolved_at"`
+	ID                int                    `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	SBOMID            int                    `json:"sbom_id" gorm:"column:sbom_id"`
+	ComponentID       int                    `json:"component_id" gorm:"column:component_id"`
+	VulnerabilityID   *int                   `json:"vulnerability_id" gorm:"column:vulnerability_id"`
+	ViolationType     ViolationType          `json:"violation_type" gorm:"column:violation_type"`
+	Severity          string                 `json:"severity" gorm:"column:severity"`
+	PolicyID          int                    `json:"policy_id" gorm:"column:policy_id"`
+	Description       string                 `json:"description" gorm:"column:description"`
+	RecommendedAction string                 `json:"recommended_action" gorm:"column:recommended_action"`
+	Status            ViolationStatus        `json:"status" gorm:"column:status"`
+	Metadata          map[string]interface{} `json:"metadata" gorm:"-"`
+	MetadataJSON      string                 `json:"-" gorm:"column:metadata_json"`
+	CreatedAt         time.Time              `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time              `json:"updated_at" gorm:"column:updated_at"`
+	ResolvedAt        *time.Time             `json:"resolved_at" gorm:"column:resolved_at"`
 }
 
 // ViolationType represents the type of policy violation
@@ -98,6 +98,11 @@ type GlobalPolicySettings struct {
 type NotificationSettings struct {
 	SlackWebhookURL      string `json:"slack_webhook_url"`
 	SlackChannel         string `json:"slack_channel"`
+	SlackEnabled         bool   `json:"slack_enabled"`
+	EmailSMTP            string `json:"email_smtp"`
+	EmailPort            int    `json:"email_port"`
+	EmailRecipients      string `json:"email_recipients"`
+	EmailEnabled         bool   `json:"email_enabled"`
 	NotifyOnViolation    bool   `json:"notify_on_violation"`
 	NotifyOnResolution   bool   `json:"notify_on_resolution"`
 	MinSeverityLevel     string `json:"min_severity_level"`
@@ -107,25 +112,25 @@ type NotificationSettings struct {
 
 // ScanResult represents the overall result of a compliance scan
 type ScanResult struct {
-	ID                   int                    `json:"id" db:"id"`
-	SBOMID               int                    `json:"sbom_id" db:"sbom_id"`
-	RepoName             string                 `json:"repo_name" db:"repo_name"`
-	ModulePath           string                 `json:"module_path" db:"module_path"`
-	ScanStartTime        time.Time              `json:"scan_start_time" db:"scan_start_time"`
-	ScanEndTime          time.Time              `json:"scan_end_time" db:"scan_end_time"`
-	Status               ScanStatus             `json:"status" db:"status"`
-	TotalComponents      int                    `json:"total_components" db:"total_components"`
-	VulnerabilitiesFound int                    `json:"vulnerabilities_found" db:"vulnerabilities_found"`
-	LicenseViolations    int                    `json:"license_violations" db:"license_violations"`
-	CriticalVulns        int                    `json:"critical_vulns" db:"critical_vulns"`
-	HighVulns            int                    `json:"high_vulns" db:"high_vulns"`
-	MediumVulns          int                    `json:"medium_vulns" db:"medium_vulns"`
-	LowVulns             int                    `json:"low_vulns" db:"low_vulns"`
-	OverallRisk          RiskLevel              `json:"overall_risk" db:"overall_risk"`
-	Metadata             map[string]interface{} `json:"metadata" db:"-"`
-	MetadataJSON         string                 `json:"-" db:"metadata_json"`
-	CreatedAt            time.Time              `json:"created_at" db:"created_at"`
-	UpdatedAt            time.Time              `json:"updated_at" db:"updated_at"`
+	ID                   int                    `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	SBOMID               int                    `json:"sbom_id" gorm:"column:sbom_id"`
+	RepoName             string                 `json:"repo_name" gorm:"column:repo_name"`
+	ModulePath           string                 `json:"module_path" gorm:"column:module_path"`
+	ScanStartTime        time.Time              `json:"scan_start_time" gorm:"column:scan_start_time"`
+	ScanEndTime          time.Time              `json:"scan_end_time" gorm:"column:scan_end_time"`
+	Status               ScanStatus             `json:"status" gorm:"column:status"`
+	TotalComponents      int                    `json:"total_components" gorm:"column:total_components"`
+	VulnerabilitiesFound int                    `json:"vulnerabilities_found" gorm:"column:vulnerabilities_found"`
+	LicenseViolations    int                    `json:"license_violations" gorm:"column:license_violations"`
+	CriticalVulns        int                    `json:"critical_vulns" gorm:"column:critical_vulns"`
+	HighVulns            int                    `json:"high_vulns" gorm:"column:high_vulns"`
+	MediumVulns          int                    `json:"medium_vulns" gorm:"column:medium_vulns"`
+	LowVulns             int                    `json:"low_vulns" gorm:"column:low_vulns"`
+	OverallRisk          RiskLevel              `json:"overall_risk" gorm:"column:overall_risk"`
+	Metadata             map[string]interface{} `json:"metadata" gorm:"-"`
+	MetadataJSON         string                 `json:"-" gorm:"column:metadata_json"`
+	CreatedAt            time.Time              `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt            time.Time              `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // ScanStatus represents the status of a scan

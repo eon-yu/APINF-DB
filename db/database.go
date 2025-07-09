@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"oss-compliance-scanner/models"
 	"path/filepath"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-//go:embed init.sql
+// go:embed init.sql
 var schemaFS embed.FS
 
 // resolveMigrationsPath determines the correct path to migrations directory
@@ -42,6 +45,7 @@ func resolveMigrationsPath() string {
 // Database represents the database connection and operations
 type Database struct {
 	conn             *sql.DB
+	orm              *gorm.DB
 	migrationManager *MigrationManager
 }
 
@@ -58,6 +62,19 @@ func NewDatabase(driverName, dataSourceName string) (*Database, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	orm, err := gorm.Open(sqlite.Open(dataSourceName), &gorm.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	// 임시로 모델 추가
+	err = orm.AutoMigrate(models.SBOM{}, models.Component{}, models.Vulnerability{},
+		models.ScanResult{}, models.LicensePolicy{}, models.VulnerabilityPolicy{},
+		models.PolicyViolation{}, models.ScanJob{}, models.Report{}, models.Setting{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to auto migrate: %w", err)
+	}
+
 	// Configure connection pool
 	conn.SetMaxOpenConns(25)
 	conn.SetMaxIdleConns(10)
@@ -70,6 +87,7 @@ func NewDatabase(driverName, dataSourceName string) (*Database, error) {
 	db := &Database{
 		conn:             conn,
 		migrationManager: migrationManager,
+		orm:              orm,
 	}
 
 	// Run migrations instead of initializing schema directly

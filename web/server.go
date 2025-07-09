@@ -132,8 +132,8 @@ func (ds *AppServer) setupRoutes() {
 	api.Put("/violations/:id/ignore", vulnerabilityService.HandleAPIIgnoreViolation)
 
 	// Settings API
-	api.Get("/settings", settingService.HandleAPIGetSettings)
-	api.Put("/settings", settingService.HandleAPIPutSettings)
+	api.Get("/settings", settingService.GetSettings)
+	api.Put("/settings", settingService.PutSettings)
 
 	// Scan API
 	api.Post("/scan/start", scanService.HandleAPIStartScan)

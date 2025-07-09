@@ -16,6 +16,9 @@ import (
 
 // Config represents the application configuration
 type Config struct {
+	AppVersion   string                      `yaml:"app_version" mapstructure:"app_version"`
+	Timezone     string                      `yaml:"timezone" mapstructure:"timezone"`
+	Language     string                      `yaml:"language" mapstructure:"language"`
 	Database     DatabaseConfig              `yaml:"database" mapstructure:"database"`
 	Scanner      ScannerConfig               `yaml:"scanner" mapstructure:"scanner"`
 	Policy       models.PolicyConfig         `yaml:"policy" mapstructure:"policy"`

@@ -1,7 +1,9 @@
 # OSS Compliance Scanner Configuration Sample
 # Copy this file to .oss-compliance-scanner.yaml and modify as needed
 # Environment variables can override these settings with OSS_SCANNER_ prefix
-
+app_version: "1.0.0"
+timezone: "Asia/Seoul"
+language: "ko"
 database:
   # Database driver: sqlite3, postgres, mysql
   driver: sqlite3
@@ -102,6 +104,11 @@ notification:
   slack_webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
   # Default Slack channel (can be overridden per notification)
   slack_channel: "#security-alerts"
+  slack_enabled: true
+  email_smtp: "smtp.gmail.com"
+  email_port: 587
+  email_recipients: "test@example.com"
+  email_enabled: true
   # When to send notifications
   notify_on_violation: true
   notify_on_resolution: false

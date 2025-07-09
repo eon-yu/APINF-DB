@@ -7,23 +7,23 @@ import (
 
 // Report represents a generated report
 type Report struct {
-	ID          int        `json:"id" db:"id"`
-	Title       string     `json:"title" db:"title"`
-	Type        string     `json:"type" db:"type"`     // pdf, csv, excel
-	Status      string     `json:"status" db:"status"` // generating, completed, failed
-	Format      string     `json:"format" db:"format"` // summary, detailed, executive
-	FilePath    string     `json:"file_path" db:"file_path"`
-	FileSize    int64      `json:"file_size" db:"file_size"`
-	GeneratedBy string     `json:"generated_by" db:"generated_by"`
-	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
-	CompletedAt *time.Time `json:"completed_at" db:"completed_at"`
+	ID          int        `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	Title       string     `json:"title" gorm:"column:title"`
+	Type        string     `json:"type" gorm:"column:type"`     // pdf, csv, excel
+	Status      string     `json:"status" gorm:"column:status"` // generating, completed, failed
+	Format      string     `json:"format" gorm:"column:format"` // summary, detailed, executive
+	FilePath    string     `json:"file_path" gorm:"column:file_path"`
+	FileSize    int64      `json:"file_size" gorm:"column:file_size"`
+	GeneratedBy string     `json:"generated_by" gorm:"column:generated_by"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"column:created_at"`
+	CompletedAt *time.Time `json:"completed_at" gorm:"column:completed_at"`
 
 	// Report configuration
-	ReportConfig ReportConfig `json:"report_config"`
+	ReportConfig ReportConfig `json:"report_config" gorm:"-"`
 
 	// Metadata
-	MetadataJSON string                 `json:"-" db:"metadata_json"`
-	Metadata     map[string]interface{} `json:"metadata"`
+	MetadataJSON string                 `json:"-" gorm:"column:metadata_json"`
+	Metadata     map[string]interface{} `json:"metadata" gorm:"-"`
 }
 
 // ReportConfig holds the configuration for report generation

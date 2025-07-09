@@ -1,50 +1,24 @@
 package db
 
 import (
-	"database/sql"
+	"errors"
 	"fmt"
 	"oss-compliance-scanner/models"
+
+	"gorm.io/gorm"
 )
 
 // CreateSBOM creates a new SBOM record
 func (db *Database) CreateSBOM(sbom *models.SBOM) error {
-	query := `
-		INSERT INTO sboms (repo_name, module_path, scan_date, syft_version, raw_sbom, component_count)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`
-
-	result, err := db.conn.Exec(query, sbom.RepoName, sbom.ModulePath, sbom.ScanDate,
-		sbom.SyftVersion, sbom.RawSBOM, sbom.ComponentCount)
-	if err != nil {
-		return fmt.Errorf("failed to create SBOM: %w", err)
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get SBOM ID: %w", err)
-	}
-
-	sbom.ID = int(id)
-	return nil
+	return db.orm.Create(sbom).Error
 }
 
 // GetSBOM retrieves an SBOM by ID
 func (db *Database) GetSBOM(id int) (*models.SBOM, error) {
-	query := `
-		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
-		       component_count, created_at, updated_at
-		FROM sboms WHERE id = ?
-	`
-
 	sbom := &models.SBOM{}
-	err := db.conn.QueryRow(query, id).Scan(
-		&sbom.ID, &sbom.RepoName, &sbom.ModulePath, &sbom.ScanDate,
-		&sbom.SyftVersion, &sbom.RawSBOM, &sbom.ComponentCount,
-		&sbom.CreatedAt, &sbom.UpdatedAt,
-	)
-
+	err := db.orm.Where("id = ?", id).First(sbom).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("SBOM not found with ID %d", id)
 		}
 		return nil, fmt.Errorf("failed to get SBOM: %w", err)
@@ -55,24 +29,10 @@ func (db *Database) GetSBOM(id int) (*models.SBOM, error) {
 
 // GetLatestSBOM retrieves the latest SBOM for a repo/module
 func (db *Database) GetLatestSBOM(repoName, modulePath string) (*models.SBOM, error) {
-	query := `
-		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
-		       component_count, created_at, updated_at
-		FROM sboms
-		WHERE repo_name = ? AND module_path = ?
-		ORDER BY scan_date DESC
-		LIMIT 1
-	`
-
 	sbom := &models.SBOM{}
-	err := db.conn.QueryRow(query, repoName, modulePath).Scan(
-		&sbom.ID, &sbom.RepoName, &sbom.ModulePath, &sbom.ScanDate,
-		&sbom.SyftVersion, &sbom.RawSBOM, &sbom.ComponentCount,
-		&sbom.CreatedAt, &sbom.UpdatedAt,
-	)
-
+	err := db.orm.Where("repo_name = ? AND module_path = ?", repoName, modulePath).Order("scan_date DESC").First(sbom).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("no SBOM found for %s/%s", repoName, modulePath)
 		}
 		return nil, fmt.Errorf("failed to get latest SBOM: %w", err)
@@ -83,38 +43,11 @@ func (db *Database) GetLatestSBOM(repoName, modulePath string) (*models.SBOM, er
 
 // GetAllSBOMs retrieves all SBOMs with limit
 func (db *Database) GetAllSBOMs(limit int) ([]*models.SBOM, error) {
-	query := `
-		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
-		       component_count, created_at, updated_at
-		FROM sboms
-		ORDER BY scan_date DESC
-		LIMIT ?
-	`
-
-	rows, err := db.conn.Query(query, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query SBOMs: %w", err)
-	}
-	defer rows.Close()
-
 	var sboms []*models.SBOM
-	for rows.Next() {
-		sbom := &models.SBOM{}
-		err := rows.Scan(
-			&sbom.ID, &sbom.RepoName, &sbom.ModulePath, &sbom.ScanDate,
-			&sbom.SyftVersion, &sbom.RawSBOM, &sbom.ComponentCount,
-			&sbom.CreatedAt, &sbom.UpdatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan SBOM: %w", err)
-		}
-		sboms = append(sboms, sbom)
+	err := db.orm.Order("scan_date DESC").Limit(limit).Find(&sboms).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all SBOMs: %w", err)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating SBOMs: %w", err)
-	}
-
 	return sboms, nil
 }
 
@@ -133,106 +66,29 @@ func (db *Database) CreateComponent(component *models.Component) error {
 	if err := component.MarshalComponentFields(); err != nil {
 		return fmt.Errorf("failed to marshal component fields: %w", err)
 	}
-
-	query := `
-		INSERT INTO components (sbom_id, name, version, type, purl, cpe, language,
-		                       licenses_json, locations_json, metadata_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	result, err := db.conn.Exec(query, component.SBOMID, component.Name, component.Version,
-		component.Type, component.PURL, component.CPE, component.Language,
-		component.LicensesJSON, component.LocationsJSON, component.MetadataJSON)
-	if err != nil {
-		return fmt.Errorf("failed to create component: %w", err)
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get component ID: %w", err)
-	}
-
-	component.ID = int(id)
-
-	// Update SBOM component count
-	if err := db.UpdateSBOMComponentCount(component.SBOMID); err != nil {
-		// Log error but don't fail the component creation
-		fmt.Printf("Warning: failed to update SBOM component count: %v\n", err)
-	}
-
+	db.orm.Create(component)
 	return nil
 }
 
 // GetComponentsBySBOM retrieves all components for an SBOM
 func (db *Database) GetComponentsBySBOM(sbomID int) ([]*models.Component, error) {
-	query := `
-		SELECT id, sbom_id, name, version, type, purl, cpe, language,
-		       licenses_json, locations_json, metadata_json, created_at, updated_at
-		FROM components WHERE sbom_id = ?
-		ORDER BY name, version
-	`
-
-	rows, err := db.conn.Query(query, sbomID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query components: %w", err)
-	}
-	defer rows.Close()
-
 	var components []*models.Component
-	for rows.Next() {
-		component := &models.Component{}
-		err := rows.Scan(
-			&component.ID, &component.SBOMID, &component.Name, &component.Version,
-			&component.Type, &component.PURL, &component.CPE, &component.Language,
-			&component.LicensesJSON, &component.LocationsJSON, &component.MetadataJSON,
-			&component.CreatedAt, &component.UpdatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan component: %w", err)
-		}
-
-		// Unmarshal JSON fields
-		if err := component.UnmarshalComponentFields(); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal component fields: %w", err)
-		}
-
-		components = append(components, component)
+	err := db.orm.Where("sbom_id = ?", sbomID).Order("name, version").Find(&components).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get components: %w", err)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating components: %w", err)
-	}
-
 	return components, nil
 }
 
 // GetComponent retrieves a specific component by ID
 func (db *Database) GetComponent(componentID int) (*models.Component, error) {
-	query := `
-		SELECT id, sbom_id, name, version, type, purl, cpe, language,
-		       licenses_json, locations_json, metadata_json, created_at, updated_at
-		FROM components WHERE id = ?
-	`
-
-	row := db.conn.QueryRow(query, componentID)
-
 	component := &models.Component{}
-	err := row.Scan(
-		&component.ID, &component.SBOMID, &component.Name, &component.Version,
-		&component.Type, &component.PURL, &component.CPE, &component.Language,
-		&component.LicensesJSON, &component.LocationsJSON, &component.MetadataJSON,
-		&component.CreatedAt, &component.UpdatedAt,
-	)
+	err := db.orm.Where("id = ?", componentID).First(component).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("component not found")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("component not found with ID %d", componentID)
 		}
 		return nil, fmt.Errorf("failed to get component: %w", err)
-	}
-
-	// Unmarshal JSON fields
-	if err := component.UnmarshalComponentFields(); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal component fields: %w", err)
 	}
 
 	return component, nil
@@ -240,55 +96,14 @@ func (db *Database) GetComponent(componentID int) (*models.Component, error) {
 
 // UpdateSBOMComponentCount updates the component_count field for an SBOM
 func (db *Database) UpdateSBOMComponentCount(sbomID int) error {
-	query := `
-		UPDATE sboms
-		SET component_count = (
-			SELECT COUNT(*) FROM components WHERE sbom_id = ?
-		),
-		updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`
-
-	_, err := db.conn.Exec(query, sbomID, sbomID)
-	if err != nil {
-		return fmt.Errorf("failed to update SBOM component count: %w", err)
-	}
-
+	db.orm.Model(&models.SBOM{}).Where("id = ?", sbomID).Update("component_count", gorm.Expr("(SELECT COUNT(*) FROM components WHERE sbom_id = ?)", sbomID))
 	return nil
 }
 
 // DeleteSBOM deletes an SBOM and all its related data (components, vulnerabilities)
 func (db *Database) DeleteSBOM(sbomID int) error {
-	tx, err := db.conn.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Delete vulnerabilities for all components of this SBOM
-	_, err = tx.Exec(`
-		DELETE FROM vulnerabilities 
-		WHERE component_id IN (
-			SELECT id FROM components WHERE sbom_id = ?
-		)
-	`, sbomID)
-	if err != nil {
-		return fmt.Errorf("failed to delete vulnerabilities: %w", err)
-	}
-
-	// Delete components
-	_, err = tx.Exec("DELETE FROM components WHERE sbom_id = ?", sbomID)
-	if err != nil {
-		return fmt.Errorf("failed to delete components: %w", err)
-	}
-
-	// Delete SBOM
-	_, err = tx.Exec("DELETE FROM sboms WHERE id = ?", sbomID)
-	if err != nil {
-		return fmt.Errorf("failed to delete SBOM: %w", err)
-	}
-
-	return tx.Commit()
+	db.orm.Where("id = ?", sbomID).Delete(&models.SBOM{})
+	return nil
 }
 
 // DeleteSBOMs deletes multiple SBOMs and all their related data
@@ -297,111 +112,30 @@ func (db *Database) DeleteSBOMs(sbomIDs []int) error {
 		return nil
 	}
 
-	tx, err := db.conn.Begin()
+	db.orm.Where("id IN (?)", sbomIDs).Delete(&models.SBOM{})
+	return nil
+}
+
+// DeleteRepository deletes all SBOMs and related data for a repository
+
+// GetSBOMsByRepository returns all SBOMs for a given repository
+func (db *Database) GetSBOMsByRepository(repoName string) ([]*models.SBOM, error) {
+	var sboms []*models.SBOM
+	err := db.orm.Where("repo_name = ?", repoName).Order("module_path, scan_date DESC").Find(&sboms).Error
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("failed to get SBOMs: %w", err)
 	}
-	defer tx.Rollback()
-
-	// Create placeholder string for IN clause
-	placeholders := ""
-	args := make([]interface{}, len(sbomIDs))
-	for i, id := range sbomIDs {
-		if i > 0 {
-			placeholders += ","
-		}
-		placeholders += "?"
-		args[i] = id
-	}
-
-	// Delete vulnerabilities for all components of these SBOMs
-	vulnQuery := fmt.Sprintf(`
-		DELETE FROM vulnerabilities 
-		WHERE component_id IN (
-			SELECT id FROM components WHERE sbom_id IN (%s)
-		)
-	`, placeholders)
-	_, err = tx.Exec(vulnQuery, args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete vulnerabilities: %w", err)
-	}
-
-	// Delete components
-	compQuery := fmt.Sprintf("DELETE FROM components WHERE sbom_id IN (%s)", placeholders)
-	_, err = tx.Exec(compQuery, args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete components: %w", err)
-	}
-
-	// Delete SBOMs
-	sbomQuery := fmt.Sprintf("DELETE FROM sboms WHERE id IN (%s)", placeholders)
-	_, err = tx.Exec(sbomQuery, args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete SBOMs: %w", err)
-	}
-
-	return tx.Commit()
+	return sboms, nil
 }
 
 // DeleteRepository deletes all SBOMs and related data for a repository
 func (db *Database) DeleteRepository(repoName string) error {
 	// First, get all SBOM IDs for this repository
-	rows, err := db.conn.Query("SELECT id FROM sboms WHERE repo_name = ?", repoName)
+	var sbomIDs []int
+	err := db.orm.Model(&models.SBOM{}).Where("repo_name = ?", repoName).Pluck("id", &sbomIDs).Error
 	if err != nil {
 		return fmt.Errorf("failed to get SBOM IDs for repository: %w", err)
 	}
-	defer rows.Close()
 
-	var sbomIDs []int
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			return fmt.Errorf("failed to scan SBOM ID: %w", err)
-		}
-		sbomIDs = append(sbomIDs, id)
-	}
-
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("error reading SBOM IDs: %w", err)
-	}
-
-	// Use existing DeleteSBOMs method to delete all SBOMs for this repository
 	return db.DeleteSBOMs(sbomIDs)
-}
-
-// GetSBOMsByRepository returns all SBOMs for a given repository
-func (db *Database) GetSBOMsByRepository(repoName string) ([]*models.SBOM, error) {
-	query := `
-		SELECT id, repo_name, module_path, scan_date, syft_version, raw_sbom,
-		       component_count, created_at, updated_at
-		FROM sboms
-		WHERE repo_name = ?
-		ORDER BY module_path, scan_date DESC
-	`
-
-	rows, err := db.conn.Query(query, repoName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query SBOMs: %w", err)
-	}
-	defer rows.Close()
-
-	var sboms []*models.SBOM
-	for rows.Next() {
-		sbom := &models.SBOM{}
-		err := rows.Scan(
-			&sbom.ID, &sbom.RepoName, &sbom.ModulePath, &sbom.ScanDate,
-			&sbom.SyftVersion, &sbom.RawSBOM, &sbom.ComponentCount,
-			&sbom.CreatedAt, &sbom.UpdatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan SBOM: %w", err)
-		}
-		sboms = append(sboms, sbom)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error reading SBOMs: %w", err)
-	}
-
-	return sboms, nil
 }

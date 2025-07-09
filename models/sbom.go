@@ -8,35 +8,35 @@ import (
 
 // SBOM represents Software Bill of Materials
 type SBOM struct {
-	ID             int       `json:"id" db:"id"`
-	RepoName       string    `json:"repo_name" db:"repo_name"`
-	ModulePath     string    `json:"module_path" db:"module_path"`
-	ScanDate       time.Time `json:"scan_date" db:"scan_date"`
-	SyftVersion    string    `json:"syft_version" db:"syft_version"`
-	RawSBOM        string    `json:"raw_sbom" db:"raw_sbom"`
-	ComponentCount int       `json:"component_count" db:"component_count"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
+	ID             int       `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	RepoName       string    `json:"repo_name" gorm:"column:repo_name"`
+	ModulePath     string    `json:"module_path" gorm:"column:module_path"`
+	ScanDate       time.Time `json:"scan_date" gorm:"column:scan_date"`
+	SyftVersion    string    `json:"syft_version" gorm:"column:syft_version"`
+	RawSBOM        string    `json:"raw_sbom" gorm:"column:raw_sbom"`
+	ComponentCount int       `json:"component_count" gorm:"column:component_count"`
+	CreatedAt      time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // Component represents a software component in SBOM
 type Component struct {
-	ID            int                    `json:"id" db:"id"`
-	SBOMID        int                    `json:"sbom_id" db:"sbom_id"`
-	Name          string                 `json:"name" db:"name"`
-	Version       string                 `json:"version" db:"version"`
-	Type          string                 `json:"type" db:"type"` // library, application, container, etc.
-	PURL          string                 `json:"purl" db:"purl"` // Package URL
-	CPE           string                 `json:"cpe" db:"cpe"`   // Common Platform Enumeration
-	Language      string                 `json:"language" db:"language"`
-	Licenses      []string               `json:"licenses" db:"-"`
-	LicensesJSON  string                 `json:"-" db:"licenses_json"`
-	Locations     []ComponentLocation    `json:"locations" db:"-"`
-	LocationsJSON string                 `json:"-" db:"locations_json"`
-	Metadata      map[string]interface{} `json:"metadata" db:"-"`
-	MetadataJSON  string                 `json:"-" db:"metadata_json"`
-	CreatedAt     time.Time              `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at" db:"updated_at"`
+	ID            int                    `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	SBOMID        int                    `json:"sbom_id" gorm:"column:sbom_id"`
+	Name          string                 `json:"name" gorm:"column:name"`
+	Version       string                 `json:"version" gorm:"column:version"`
+	Type          string                 `json:"type" gorm:"column:type"` // library, application, container, etc.
+	PURL          string                 `json:"purl" gorm:"column:purl"` // Package URL
+	CPE           string                 `json:"cpe" gorm:"column:cpe"`   // Common Platform Enumeration
+	Language      string                 `json:"language" gorm:"column:language"`
+	Licenses      []string               `json:"licenses" gorm:"-"`
+	LicensesJSON  string                 `json:"-" gorm:"column:licenses_json"`
+	Locations     []ComponentLocation    `json:"locations" gorm:"-"`
+	LocationsJSON string                 `json:"-" gorm:"column:locations_json"`
+	Metadata      map[string]interface{} `json:"metadata" gorm:"-"`
+	MetadataJSON  string                 `json:"-" gorm:"column:metadata_json"`
+	CreatedAt     time.Time              `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt     time.Time              `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // ComponentLocation represents where a component is found
