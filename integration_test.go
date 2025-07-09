@@ -343,7 +343,7 @@ func (suite *APIIntegrationTestSuite) createTestData() {
 }
 
 // makeAPIRequest makes an HTTP request to the API and returns the response
-func (suite *APIIntegrationTestSuite) makeAPIRequest(method, endpoint string, body interface{}) (*http.Response, []byte) {
+func (suite *APIIntegrationTestSuite) makeAPIRequest(method, endpoint string, body any) (*http.Response, []byte) {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -374,7 +374,7 @@ func (suite *APIIntegrationTestSuite) TestHealthCheckEndpoints() {
 	resp, body := suite.makeAPIRequest("GET", "/api/v1/health", nil)
 	assert.Equal(suite.T(), http.StatusOK, resp.StatusCode)
 
-	var health map[string]interface{}
+	var health map[string]any
 	err := json.Unmarshal(body, &health)
 	require.NoError(suite.T(), err)
 	assert.Equal(suite.T(), "ok", health["status"])
@@ -395,7 +395,7 @@ func (suite *APIIntegrationTestSuite) TestStatsEndpoint() {
 	resp, body := suite.makeAPIRequest("GET", "/api/v1/stats", nil)
 	assert.Equal(suite.T(), http.StatusOK, resp.StatusCode)
 
-	var stats map[string]interface{}
+	var stats map[string]any
 	err := json.Unmarshal(body, &stats)
 	require.NoError(suite.T(), err)
 
@@ -437,7 +437,7 @@ func (suite *APIIntegrationTestSuite) TestSBOMEndpoints() {
 	resp, body = suite.makeAPIRequest("GET", fmt.Sprintf("/api/v1/sboms/%d/components", sbomID), nil)
 	assert.Equal(suite.T(), http.StatusOK, resp.StatusCode)
 
-	var components []map[string]interface{}
+	var components []map[string]any
 	err = json.Unmarshal(body, &components)
 	require.NoError(suite.T(), err)
 	assert.Greater(suite.T(), len(components), 0)
@@ -457,7 +457,7 @@ func (suite *APIIntegrationTestSuite) TestSBOMEndpoints() {
 	assert.Equal(suite.T(), http.StatusOK, resp.StatusCode)
 
 	// The response could be an object with licenses field or an array
-	var licensesResp interface{}
+	var licensesResp any
 	err = json.Unmarshal(body, &licensesResp)
 	require.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), licensesResp)

@@ -17,7 +17,7 @@ func NewDashboardService(db *db.Database) *DashboardService {
 	return &DashboardService{database: db}
 }
 
-func GetStats(database *db.Database) (map[string]interface{}, error) {
+func GetStats(database *db.Database) (map[string]any, error) {
 	// Get SBOMs for stats
 	allSBOMs, err := database.GetAllSBOMs(100)
 	if err != nil {
@@ -47,7 +47,7 @@ func GetStats(database *db.Database) (map[string]interface{}, error) {
 		scanResults = []*models.ScanResult{} // Empty slice on error
 	}
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"total_sboms":           len(allSBOMs), // Total SBOMs ever created
 		"unique_repositories":   len(sboms),    // Unique repositories
 		"total_scans":           len(scanResults),

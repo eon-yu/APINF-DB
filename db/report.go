@@ -42,7 +42,7 @@ func (db *Database) GetAllReports(limit int) ([]*models.Report, error) {
 // UpdateReportStatus updates the status of a report
 func (db *Database) UpdateReportStatus(id int, status string, filePath string, fileSize int64) error {
 	if status == "completed" {
-		return db.orm.Model(&models.Report{}).Where("id = ?", id).Updates(map[string]interface{}{
+		return db.orm.Model(&models.Report{}).Where("id = ?", id).Updates(map[string]any{
 			"status":       status,
 			"file_path":    filePath,
 			"file_size":    fileSize,
@@ -112,7 +112,7 @@ func (db *Database) GetReportData(cfg models.ReportConfig) (*models.ReportData, 
 }
 
 // getReportSummary generates summary statistics for the report
-func (db *Database) getReportSummary(whereClause string, args []interface{}) (*models.ReportSummary, error) {
+func (db *Database) getReportSummary(whereClause string, args []any) (*models.ReportSummary, error) {
 	summary := &models.ReportSummary{
 		VulnsBySeverity:      make(map[string]int),
 		LicenseDistribution:  make(map[string]int),
@@ -181,7 +181,7 @@ func (db *Database) getReportSummary(whereClause string, args []interface{}) (*m
 }
 
 // getRepositoryReports generates detailed reports for each repository
-func (db *Database) getRepositoryReports(whereClause string, args []interface{}, config models.ReportConfig) ([]models.RepositoryReport, error) {
+func (db *Database) getRepositoryReports(whereClause string, args []any, config models.ReportConfig) ([]models.RepositoryReport, error) {
 	var repositories []models.RepositoryReport
 	db.orm.Model(&models.ScanResult{}).Select(`
 			repo_name,
@@ -246,7 +246,7 @@ func (db *Database) getRepositoryReports(whereClause string, args []interface{},
 }
 
 // getModuleReports gets detailed module information for a repository
-func (db *Database) getModuleReports(repoName string, whereClause string, args []interface{}) ([]models.ModuleReport, error) {
+func (db *Database) getModuleReports(repoName string, whereClause string, args []any) ([]models.ModuleReport, error) {
 	// Add repository filter to the where clause
 	moduleWhereClause := whereClause + " AND sr.repo_name = ?"
 	moduleArgs := append(args, repoName)

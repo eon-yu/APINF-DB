@@ -255,7 +255,7 @@ func createTestVulnerability(database *db.Database, sbomID int, componentName st
 		ModifiedDate:  &modifiedDate,
 		URLs:          []string{fmt.Sprintf("https://nvd.nist.gov/vuln/detail/CVE-2023-%04d", 1000+index)},
 		Fixes:         []models.VulnerabilityFix{{Version: "999.0.0", State: "fixed"}},
-		Metadata:      map[string]interface{}{},
+		Metadata:      map[string]any{},
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}

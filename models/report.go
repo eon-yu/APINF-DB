@@ -22,8 +22,8 @@ type Report struct {
 	ReportConfig ReportConfig `json:"report_config" gorm:"-"`
 
 	// Metadata
-	MetadataJSON string                 `json:"-" gorm:"column:metadata_json"`
-	Metadata     map[string]interface{} `json:"metadata" gorm:"-"`
+	MetadataJSON string         `json:"-" gorm:"column:metadata_json"`
+	Metadata     map[string]any `json:"metadata" gorm:"-"`
 }
 
 // ReportConfig holds the configuration for report generation
@@ -129,7 +129,7 @@ func (r *Report) MarshalReportFields() error {
 
 	// Store config in metadata for now (could add separate column if needed)
 	if r.Metadata == nil {
-		r.Metadata = make(map[string]interface{})
+		r.Metadata = make(map[string]any)
 	}
 	r.Metadata["config"] = string(configJSON)
 

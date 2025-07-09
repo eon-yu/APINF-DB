@@ -35,24 +35,24 @@ type RuleCondition struct {
 
 // RuleSet represents a collection of custom rules
 type RuleSet struct {
-	Version     string                 `yaml:"version"`
-	Name        string                 `yaml:"name"`
-	Description string                 `yaml:"description"`
-	Rules       []CustomRule           `yaml:"rules"`
-	Globals     map[string]interface{} `yaml:"globals"`
+	Version     string         `yaml:"version"`
+	Name        string         `yaml:"name"`
+	Description string         `yaml:"description"`
+	Rules       []CustomRule   `yaml:"rules"`
+	Globals     map[string]any `yaml:"globals"`
 }
 
 // RuleEngine manages and evaluates custom rules
 type RuleEngine struct {
 	ruleSets []RuleSet
-	globals  map[string]interface{}
+	globals  map[string]any
 }
 
 // NewRuleEngine creates a new rule engine
 func NewRuleEngine() *RuleEngine {
 	return &RuleEngine{
 		ruleSets: make([]RuleSet, 0),
-		globals:  make(map[string]interface{}),
+		globals:  make(map[string]any),
 	}
 }
 
@@ -119,7 +119,7 @@ func (re *RuleEngine) EvaluateComponent(component *models.Component) ([]*models.
 					Description:       fmt.Sprintf("Rule '%s': %s", rule.Name, rule.Description),
 					RecommendedAction: fmt.Sprintf("Action required: %s. Component %s@%s matches rule %s", rule.Action, component.Name, component.Version, rule.Name),
 					Status:            models.ViolationStatusOpen,
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"rule_id":           rule.ID,
 						"rule_name":         rule.Name,
 						"rule_action":       rule.Action,
@@ -146,7 +146,7 @@ func (re *RuleEngine) EvaluateLicense(license string, component *models.Componen
 			}
 
 			// Create a mock license object for evaluation
-			licenseData := map[string]interface{}{
+			licenseData := map[string]any{
 				"license": license,
 			}
 
@@ -161,7 +161,7 @@ func (re *RuleEngine) EvaluateLicense(license string, component *models.Componen
 					Description:       fmt.Sprintf("License Rule '%s': %s", rule.Name, rule.Description),
 					RecommendedAction: fmt.Sprintf("Action required: %s. License %s violates rule %s", rule.Action, license, rule.Name),
 					Status:            models.ViolationStatusOpen,
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"rule_id":           rule.ID,
 						"rule_name":         rule.Name,
 						"rule_action":       rule.Action,
@@ -201,7 +201,7 @@ func (re *RuleEngine) EvaluateVulnerability(vuln *models.Vulnerability, componen
 					Description:       fmt.Sprintf("Vulnerability Rule '%s': %s", rule.Name, rule.Description),
 					RecommendedAction: fmt.Sprintf("Action required: %s. Vulnerability %s violates rule %s", rule.Action, vuln.VulnID, rule.Name),
 					Status:            models.ViolationStatusOpen,
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"rule_id":           rule.ID,
 						"rule_name":         rule.Name,
 						"rule_action":       rule.Action,
@@ -219,7 +219,7 @@ func (re *RuleEngine) EvaluateVulnerability(vuln *models.Vulnerability, componen
 }
 
 // evaluateRuleConditions evaluates a set of rule conditions
-func (re *RuleEngine) evaluateRuleConditions(conditions []RuleCondition, component *models.Component, vuln *models.Vulnerability, extra map[string]interface{}) (bool, error) {
+func (re *RuleEngine) evaluateRuleConditions(conditions []RuleCondition, component *models.Component, vuln *models.Vulnerability, extra map[string]any) (bool, error) {
 	// All conditions must match (AND logic)
 	for _, condition := range conditions {
 		matches, err := re.evaluateCondition(condition, component, vuln, extra)
@@ -240,7 +240,7 @@ func (re *RuleEngine) evaluateRuleConditions(conditions []RuleCondition, compone
 }
 
 // evaluateRuleConditionsMap evaluates conditions against a map of data
-func (re *RuleEngine) evaluateRuleConditionsMap(conditions []RuleCondition, data map[string]interface{}, component *models.Component, vuln *models.Vulnerability) (bool, error) {
+func (re *RuleEngine) evaluateRuleConditionsMap(conditions []RuleCondition, data map[string]any, component *models.Component, vuln *models.Vulnerability) (bool, error) {
 	for _, condition := range conditions {
 		matches, err := re.evaluateConditionMap(condition, data, component, vuln)
 		if err != nil {
@@ -260,7 +260,7 @@ func (re *RuleEngine) evaluateRuleConditionsMap(conditions []RuleCondition, data
 }
 
 // evaluateCondition evaluates a single condition
-func (re *RuleEngine) evaluateCondition(condition RuleCondition, component *models.Component, vuln *models.Vulnerability, extra map[string]interface{}) (bool, error) {
+func (re *RuleEngine) evaluateCondition(condition RuleCondition, component *models.Component, vuln *models.Vulnerability, extra map[string]any) (bool, error) {
 	fieldValue, err := re.getFieldValue(condition.Field, component, vuln, extra)
 	if err != nil {
 		return false, err
@@ -270,8 +270,8 @@ func (re *RuleEngine) evaluateCondition(condition RuleCondition, component *mode
 }
 
 // evaluateConditionMap evaluates a condition against a map
-func (re *RuleEngine) evaluateConditionMap(condition RuleCondition, data map[string]interface{}, component *models.Component, vuln *models.Vulnerability) (bool, error) {
-	var fieldValue interface{}
+func (re *RuleEngine) evaluateConditionMap(condition RuleCondition, data map[string]any, component *models.Component, vuln *models.Vulnerability) (bool, error) {
+	var fieldValue any
 
 	if value, exists := data[condition.Field]; exists {
 		fieldValue = value
@@ -288,7 +288,7 @@ func (re *RuleEngine) evaluateConditionMap(condition RuleCondition, data map[str
 }
 
 // getFieldValue extracts a field value from component, vulnerability, or extra data
-func (re *RuleEngine) getFieldValue(field string, component *models.Component, vuln *models.Vulnerability, extra map[string]interface{}) (interface{}, error) {
+func (re *RuleEngine) getFieldValue(field string, component *models.Component, vuln *models.Vulnerability, extra map[string]any) (any, error) {
 	// Check extra data first
 	if extra != nil {
 		if value, exists := extra[field]; exists {
@@ -338,7 +338,7 @@ func (re *RuleEngine) getFieldValue(field string, component *models.Component, v
 }
 
 // applyOperator applies an operator to compare field value with rule value
-func (re *RuleEngine) applyOperator(operator string, fieldValue interface{}, ruleValue string) (bool, error) {
+func (re *RuleEngine) applyOperator(operator string, fieldValue any, ruleValue string) (bool, error) {
 	fieldStr := fmt.Sprintf("%v", fieldValue)
 
 	switch operator {
@@ -435,7 +435,7 @@ func (re *RuleEngine) applyOperator(operator string, fieldValue interface{}, rul
 }
 
 // toFloat64 converts various types to float64
-func (re *RuleEngine) toFloat64(value interface{}) (float64, error) {
+func (re *RuleEngine) toFloat64(value any) (float64, error) {
 	switch v := value.(type) {
 	case float64:
 		return v, nil

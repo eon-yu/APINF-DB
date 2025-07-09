@@ -146,16 +146,16 @@ func (db *Database) Ping() error {
 }
 
 // Query executes a query that returns rows
-func (db *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
+func (db *Database) Query(query string, args ...any) (*sql.Rows, error) {
 	return db.conn.Query(query, args...)
 }
 
 // QueryRow executes a query that is expected to return at most one row
-func (db *Database) QueryRow(query string, args ...interface{}) *sql.Row {
+func (db *Database) QueryRow(query string, args ...any) *sql.Row {
 	return db.conn.QueryRow(query, args...)
 }
 
 // Exec executes a query without returning any rows
-func (db *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (db *Database) Exec(query string, args ...any) (sql.Result, error) {
 	return db.conn.Exec(query, args...)
 }

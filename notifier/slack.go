@@ -68,8 +68,8 @@ type SlackField struct {
 
 // SlackBlock represents a Slack block element
 type SlackBlock struct {
-	Type string      `json:"type"`
-	Text interface{} `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text any    `json:"text,omitempty"`
 }
 
 // NotificationOptions contains options for notifications

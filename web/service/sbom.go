@@ -117,7 +117,7 @@ func (ds *SBOMService) HandleAPIComponentDetail(c *fiber.Ctx) error {
 	}
 
 	// Return component with proper field names
-	response := map[string]interface{}{
+	response := map[string]any{
 		"id":         component.ID,
 		"name":       component.Name,
 		"version":    component.Version,

@@ -45,7 +45,7 @@ func (ds *VulnerabilityService) HandleAPIVulnerabilities(c *fiber.Ctx) error {
 
 func (ds *VulnerabilityService) HandleAPIViolations(c *fiber.Ctx) error {
 	// This would require violation tracking in the database
-	return c.JSON([]interface{}{})
+	return c.JSON([]any{})
 }
 func (ds *VulnerabilityService) HandleAPIResolveViolation(c *fiber.Ctx) error {
 	idParam := c.Params("id")

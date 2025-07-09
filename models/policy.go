@@ -41,21 +41,21 @@ type VulnerabilityPolicy struct {
 
 // PolicyViolation represents a policy violation found during scan
 type PolicyViolation struct {
-	ID                int                    `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
-	SBOMID            int                    `json:"sbom_id" gorm:"column:sbom_id"`
-	ComponentID       int                    `json:"component_id" gorm:"column:component_id"`
-	VulnerabilityID   *int                   `json:"vulnerability_id" gorm:"column:vulnerability_id"`
-	ViolationType     ViolationType          `json:"violation_type" gorm:"column:violation_type"`
-	Severity          string                 `json:"severity" gorm:"column:severity"`
-	PolicyID          int                    `json:"policy_id" gorm:"column:policy_id"`
-	Description       string                 `json:"description" gorm:"column:description"`
-	RecommendedAction string                 `json:"recommended_action" gorm:"column:recommended_action"`
-	Status            ViolationStatus        `json:"status" gorm:"column:status"`
-	Metadata          map[string]interface{} `json:"metadata" gorm:"-"`
-	MetadataJSON      string                 `json:"-" gorm:"column:metadata_json"`
-	CreatedAt         time.Time              `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt         time.Time              `json:"updated_at" gorm:"column:updated_at"`
-	ResolvedAt        *time.Time             `json:"resolved_at" gorm:"column:resolved_at"`
+	ID                int             `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	SBOMID            int             `json:"sbom_id" gorm:"column:sbom_id"`
+	ComponentID       int             `json:"component_id" gorm:"column:component_id"`
+	VulnerabilityID   *int            `json:"vulnerability_id" gorm:"column:vulnerability_id"`
+	ViolationType     ViolationType   `json:"violation_type" gorm:"column:violation_type"`
+	Severity          string          `json:"severity" gorm:"column:severity"`
+	PolicyID          int             `json:"policy_id" gorm:"column:policy_id"`
+	Description       string          `json:"description" gorm:"column:description"`
+	RecommendedAction string          `json:"recommended_action" gorm:"column:recommended_action"`
+	Status            ViolationStatus `json:"status" gorm:"column:status"`
+	Metadata          map[string]any  `json:"metadata" gorm:"-"`
+	MetadataJSON      string          `json:"-" gorm:"column:metadata_json"`
+	CreatedAt         time.Time       `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time       `json:"updated_at" gorm:"column:updated_at"`
+	ResolvedAt        *time.Time      `json:"resolved_at" gorm:"column:resolved_at"`
 }
 
 // ViolationType represents the type of policy violation
@@ -112,25 +112,25 @@ type NotificationSettings struct {
 
 // ScanResult represents the overall result of a compliance scan
 type ScanResult struct {
-	ID                   int                    `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
-	SBOMID               int                    `json:"sbom_id" gorm:"column:sbom_id"`
-	RepoName             string                 `json:"repo_name" gorm:"column:repo_name"`
-	ModulePath           string                 `json:"module_path" gorm:"column:module_path"`
-	ScanStartTime        time.Time              `json:"scan_start_time" gorm:"column:scan_start_time"`
-	ScanEndTime          time.Time              `json:"scan_end_time" gorm:"column:scan_end_time"`
-	Status               ScanStatus             `json:"status" gorm:"column:status"`
-	TotalComponents      int                    `json:"total_components" gorm:"column:total_components"`
-	VulnerabilitiesFound int                    `json:"vulnerabilities_found" gorm:"column:vulnerabilities_found"`
-	LicenseViolations    int                    `json:"license_violations" gorm:"column:license_violations"`
-	CriticalVulns        int                    `json:"critical_vulns" gorm:"column:critical_vulns"`
-	HighVulns            int                    `json:"high_vulns" gorm:"column:high_vulns"`
-	MediumVulns          int                    `json:"medium_vulns" gorm:"column:medium_vulns"`
-	LowVulns             int                    `json:"low_vulns" gorm:"column:low_vulns"`
-	OverallRisk          RiskLevel              `json:"overall_risk" gorm:"column:overall_risk"`
-	Metadata             map[string]interface{} `json:"metadata" gorm:"-"`
-	MetadataJSON         string                 `json:"-" gorm:"column:metadata_json"`
-	CreatedAt            time.Time              `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt            time.Time              `json:"updated_at" gorm:"column:updated_at"`
+	ID                   int            `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	SBOMID               int            `json:"sbom_id" gorm:"column:sbom_id"`
+	RepoName             string         `json:"repo_name" gorm:"column:repo_name"`
+	ModulePath           string         `json:"module_path" gorm:"column:module_path"`
+	ScanStartTime        time.Time      `json:"scan_start_time" gorm:"column:scan_start_time"`
+	ScanEndTime          time.Time      `json:"scan_end_time" gorm:"column:scan_end_time"`
+	Status               ScanStatus     `json:"status" gorm:"column:status"`
+	TotalComponents      int            `json:"total_components" gorm:"column:total_components"`
+	VulnerabilitiesFound int            `json:"vulnerabilities_found" gorm:"column:vulnerabilities_found"`
+	LicenseViolations    int            `json:"license_violations" gorm:"column:license_violations"`
+	CriticalVulns        int            `json:"critical_vulns" gorm:"column:critical_vulns"`
+	HighVulns            int            `json:"high_vulns" gorm:"column:high_vulns"`
+	MediumVulns          int            `json:"medium_vulns" gorm:"column:medium_vulns"`
+	LowVulns             int            `json:"low_vulns" gorm:"column:low_vulns"`
+	OverallRisk          RiskLevel      `json:"overall_risk" gorm:"column:overall_risk"`
+	Metadata             map[string]any `json:"metadata" gorm:"-"`
+	MetadataJSON         string         `json:"-" gorm:"column:metadata_json"`
+	CreatedAt            time.Time      `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt            time.Time      `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // ScanStatus represents the status of a scan

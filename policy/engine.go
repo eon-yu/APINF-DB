@@ -193,7 +193,7 @@ func (pe *PolicyEngine) checkLicensePolicy(sbom *models.SBOM, component *models.
 			Description:       fmt.Sprintf("License '%s' in component '%s@%s' violates policy", licenseName, component.Name, component.Version),
 			RecommendedAction: fmt.Sprintf("Action required: %s. Reason: %s", matchedPolicy.Action, matchedPolicy.Reason),
 			Status:            models.ViolationStatusOpen,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"license_name":      licenseName,
 				"component_name":    component.Name,
 				"component_version": component.Version,
@@ -244,7 +244,7 @@ func (pe *PolicyEngine) checkVulnerabilityPolicy(sbom *models.SBOM, vuln *models
 					Description:       fmt.Sprintf("Vulnerability %s (%s) with CVSS score %.1f violates policy", vuln.VulnID, vuln.Severity, vuln.CVSS3Score),
 					RecommendedAction: pe.generateVulnRecommendation(vuln, policy),
 					Status:            models.ViolationStatusOpen,
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"vuln_id":         vuln.VulnID,
 						"cvss3_score":     vuln.CVSS3Score,
 						"cvss2_score":     vuln.CVSS2Score,
@@ -275,7 +275,7 @@ func (pe *PolicyEngine) createLicenseViolation(sbom *models.SBOM, component *mod
 					Description:       fmt.Sprintf("Component '%s@%s' has unknown license", component.Name, component.Version),
 					RecommendedAction: "Review and identify the actual license for this component",
 					Status:            models.ViolationStatusOpen,
-					Metadata: map[string]interface{}{
+					Metadata: map[string]any{
 						"component_name":    component.Name,
 						"component_version": component.Version,
 						"purl":              component.PURL,

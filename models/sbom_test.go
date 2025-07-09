@@ -42,7 +42,7 @@ func TestComponent_MarshalComponentFields(t *testing.T) {
 			{Path: "/app/package.json"},
 			{Path: "/app/node_modules/express"},
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"description": "Fast, unopinionated, minimalist web framework",
 			"author":      "TJ Holowaychuk",
 		},
@@ -252,7 +252,7 @@ func TestVulnerability_MarshalVulnerabilityFields(t *testing.T) {
 			{Version: "1.2.3", State: "fixed"},
 			{Version: "1.2.4", State: "fixed"},
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"source":     "grype",
 			"confidence": 0.95,
 		},
@@ -374,7 +374,7 @@ func TestGrypeOutput_Structure(t *testing.T) {
 
 func TestPolicyViolation_MarshalPolicyViolationFields(t *testing.T) {
 	violation := &PolicyViolation{
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"rule":       "license-check",
 			"confidence": 0.98,
 			"details":    "GPL license not allowed",
@@ -410,7 +410,7 @@ func TestPolicyViolation_UnmarshalPolicyViolationFields_InvalidJSON(t *testing.T
 
 func TestScanResult_MarshalScanResultFields(t *testing.T) {
 	result := &ScanResult{
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"scanner_version": "1.0.0",
 			"scan_options":    []string{"--all", "--verbose"},
 			"duration":        "5m30s",

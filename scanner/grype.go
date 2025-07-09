@@ -179,7 +179,7 @@ func (g *GrypeScanner) UpdateDatabase(ctx context.Context) error {
 }
 
 // GetDatabaseInfo gets information about the vulnerability database
-func (g *GrypeScanner) GetDatabaseInfo(ctx context.Context) (map[string]interface{}, error) {
+func (g *GrypeScanner) GetDatabaseInfo(ctx context.Context) (map[string]any, error) {
 	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -193,7 +193,7 @@ func (g *GrypeScanner) GetDatabaseInfo(ctx context.Context) (map[string]interfac
 	}
 
 	// Parse the output (usually in a structured format)
-	info := make(map[string]interface{})
+	info := make(map[string]any)
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -301,7 +301,7 @@ func (g *GrypeScanner) parseGrypeMatches(matches []models.GrypeMatch) ([]*models
 		}
 
 		// Set metadata
-		vuln.Metadata = map[string]interface{}{
+		vuln.Metadata = map[string]any{
 			"data_source":   match.Vulnerability.DataSource,
 			"namespace":     match.Vulnerability.Namespace,
 			"advisories":    match.Vulnerability.Advisories,

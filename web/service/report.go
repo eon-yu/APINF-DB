@@ -55,7 +55,7 @@ func (ds *ReportService) HandleAPICreateReport(c *fiber.Ctx) error {
 		GeneratedBy:  "system",  // In production, get from user context
 		CreatedAt:    time.Now(),
 		ReportConfig: req,
-		Metadata:     make(map[string]interface{}),
+		Metadata:     make(map[string]any),
 	}
 
 	// Save report to database

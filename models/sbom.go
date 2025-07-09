@@ -21,22 +21,22 @@ type SBOM struct {
 
 // Component represents a software component in SBOM
 type Component struct {
-	ID            int                    `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
-	SBOMID        int                    `json:"sbom_id" gorm:"column:sbom_id"`
-	Name          string                 `json:"name" gorm:"column:name"`
-	Version       string                 `json:"version" gorm:"column:version"`
-	Type          string                 `json:"type" gorm:"column:type"` // library, application, container, etc.
-	PURL          string                 `json:"purl" gorm:"column:purl"` // Package URL
-	CPE           string                 `json:"cpe" gorm:"column:cpe"`   // Common Platform Enumeration
-	Language      string                 `json:"language" gorm:"column:language"`
-	Licenses      []string               `json:"licenses" gorm:"-"`
-	LicensesJSON  string                 `json:"-" gorm:"column:licenses_json"`
-	Locations     []ComponentLocation    `json:"locations" gorm:"-"`
-	LocationsJSON string                 `json:"-" gorm:"column:locations_json"`
-	Metadata      map[string]interface{} `json:"metadata" gorm:"-"`
-	MetadataJSON  string                 `json:"-" gorm:"column:metadata_json"`
-	CreatedAt     time.Time              `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt     time.Time              `json:"updated_at" gorm:"column:updated_at"`
+	ID            int                 `json:"id" gorm:"column:id;primaryKey;autoIncrement"`
+	SBOMID        int                 `json:"sbom_id" gorm:"column:sbom_id"`
+	Name          string              `json:"name" gorm:"column:name"`
+	Version       string              `json:"version" gorm:"column:version"`
+	Type          string              `json:"type" gorm:"column:type"` // library, application, container, etc.
+	PURL          string              `json:"purl" gorm:"column:purl"` // Package URL
+	CPE           string              `json:"cpe" gorm:"column:cpe"`   // Common Platform Enumeration
+	Language      string              `json:"language" gorm:"column:language"`
+	Licenses      []string            `json:"licenses" gorm:"-"`
+	LicensesJSON  string              `json:"-" gorm:"column:licenses_json"`
+	Locations     []ComponentLocation `json:"locations" gorm:"-"`
+	LocationsJSON string              `json:"-" gorm:"column:locations_json"`
+	Metadata      map[string]any      `json:"metadata" gorm:"-"`
+	MetadataJSON  string              `json:"-" gorm:"column:metadata_json"`
+	CreatedAt     time.Time           `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt     time.Time           `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // ComponentLocation represents where a component is found
@@ -66,23 +66,23 @@ type SyftDistro struct {
 }
 
 type SyftSource struct {
-	Type     string                 `json:"type"`
-	Target   string                 `json:"target"`
-	Metadata map[string]interface{} `json:"metadata"`
+	Type     string         `json:"type"`
+	Target   string         `json:"target"`
+	Metadata map[string]any `json:"metadata"`
 }
 
 type SyftArtifact struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Version     string                 `json:"version"`
-	Type        string                 `json:"type"`
-	PURL        string                 `json:"purl"`
-	CPEs        []SyftCPE              `json:"cpes"`
-	Language    string                 `json:"language"`
-	Licenses    []string               `json:"-"` // Custom handling
-	LicensesRaw json.RawMessage        `json:"licenses"`
-	Locations   []SyftLocation         `json:"locations"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Version     string          `json:"version"`
+	Type        string          `json:"type"`
+	PURL        string          `json:"purl"`
+	CPEs        []SyftCPE       `json:"cpes"`
+	Language    string          `json:"language"`
+	Licenses    []string        `json:"-"` // Custom handling
+	LicensesRaw json.RawMessage `json:"licenses"`
+	Locations   []SyftLocation  `json:"locations"`
+	Metadata    map[string]any  `json:"metadata"`
 }
 
 // UnmarshalLicenses parses the various license formats from Syft
@@ -106,7 +106,7 @@ func (s *SyftArtifact) UnmarshalLicenses() []string {
 	}
 
 	// Try parsing as array of objects
-	var objectArray []map[string]interface{}
+	var objectArray []map[string]any
 	if err := json.Unmarshal(s.LicensesRaw, &objectArray); err == nil {
 		var licenses []string
 		for _, obj := range objectArray {
