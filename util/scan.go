@@ -7,15 +7,11 @@ import (
 	"log"
 	"os"
 	"oss-compliance-scanner/config"
-	"oss-compliance-scanner/db"
-	"oss-compliance-scanner/models"
 	"oss-compliance-scanner/notifier"
-	"oss-compliance-scanner/policy"
 	"oss-compliance-scanner/scanner"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 // ScanContext holds all the context information for a scan
@@ -28,12 +24,9 @@ type ScanContext struct {
 	Verbose    bool
 
 	// Initialized components
-	Config       *config.Config
-	Database     *db.Database
-	SyftScanner  *scanner.SyftScanner
-	GrypeScanner *scanner.GrypeScanner
-	PolicyEngine *policy.PolicyEngine
-	Notifier     *notifier.SlackNotifier
+	Config      *config.Config
+	SyftScanner *scanner.SyftScanner
+	Notifier    *notifier.SlackNotifier
 }
 
 // executeScan performs the actual scanning process
@@ -52,9 +45,6 @@ func ExecuteScan(ctx *ScanContext) error {
 			fmt.Printf("  - %s\n", target)
 		}
 	}
-
-	// Initialize components
-	fmt.Println("🏗️  Initializing components...")
 
 	if err := initializeComponents(ctx); err != nil {
 		return fmt.Errorf("failed to initialize components: %w", err)
@@ -76,26 +66,14 @@ func ExecuteScan(ctx *ScanContext) error {
 		processTargetsSequentially(ctx, scanTargets)
 	}
 
-	fmt.Println("\n📊 Generating summary report...")
-	if err := generateSummaryReport(ctx); err != nil {
-		log.Printf("Warning: Failed to generate summary report: %v", err)
-	}
-
 	return nil
 }
 
 // initializeComponents initializes all necessary components for scanning
 func initializeComponents(ctx *ScanContext) error {
-	var err error
 
 	// Load configuration
 	ctx.Config = config.GetConfig()
-
-	// Initialize database connection
-	ctx.Database, err = db.NewDatabase(ctx.Config.Database.Driver, ctx.Config.Database.GetDSN())
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
 
 	// Initialize Syft scanner
 	ctx.SyftScanner = scanner.NewSyftScanner(
@@ -105,44 +83,19 @@ func initializeComponents(ctx *ScanContext) error {
 		ctx.Config.Scanner.TimeoutSeconds,
 	)
 
-	// Initialize Grype scanner
-	ctx.GrypeScanner = scanner.NewGrypeScanner(
-		ctx.Config.Scanner.GrypePath,
-		ctx.Config.Scanner.TempDir,
-		ctx.Config.Scanner.CacheDir,
-		ctx.Config.Scanner.TimeoutSeconds,
-	)
-
-	// Initialize policy engine
-	licensePolicies, err := ctx.Database.GetActiveLicensePolicies()
-	if err != nil {
-		log.Printf("Warning: Failed to load license policies: %v", err)
-	}
-
-	vulnerabilityPolicies, err := ctx.Database.GetActiveVulnerabilityPolicies()
-	if err != nil {
-		log.Printf("Warning: Failed to load vulnerability policies: %v", err)
-	}
-
-	ctx.PolicyEngine = policy.NewPolicyEngine(licensePolicies, vulnerabilityPolicies, ctx.Config.Policy.GlobalSettings)
-
 	// Initialize notifier if notifications are enabled
-	if ctx.Notify && ctx.Config.Notification.SlackWebhookURL != "" {
-		ctx.Notifier = notifier.NewSlackNotifier(
-			ctx.Config.Notification.SlackWebhookURL,
-			"OSS-Compliance-Bot",
-			ctx.Config.Notification.SlackChannel,
-			":warning:",
-		)
-	}
-
+	// if ctx.Notify && ctx.Config.Notification.SlackWebhookURL != "" {
+	// 	ctx.Notifier = notifier.NewSlackNotifier(
+	// 		ctx.Config.Notification.SlackWebhookURL,
+	// 		"OSS-Compliance-Bot",
+	// 		ctx.Config.Notification.SlackChannel,
+	// 		":warning:",
+	// 	)
+	// }
 	// Validate scanner installations
 	scannerCtx := context.Background()
 	if err := ctx.SyftScanner.ValidateInstallation(scannerCtx); err != nil {
 		return fmt.Errorf("syft validation failed: %w", err)
-	}
-	if err := ctx.GrypeScanner.ValidateInstallation(scannerCtx); err != nil {
-		return fmt.Errorf("grype validation failed: %w", err)
 	}
 
 	return nil
@@ -283,208 +236,19 @@ func autoDiscoverTargets(repoPath string, verbose bool) []string {
 
 // processScanTarget processes a single scan target
 func processScanTarget(ctx *ScanContext, targetPath string) error {
-	scanStartTime := time.Now()
 
 	relPath, _ := filepath.Rel(ctx.RepoPath, targetPath)
 	if relPath == "." {
 		relPath = "root"
 	}
 
-	repoName := filepath.Base(ctx.RepoPath)
-	scannerCtx := context.Background()
-
-	var sbomRecord *models.SBOM
-	var sbomComponents []*models.Component
-	var vulnerabilities []*models.Vulnerability
-
 	// Step 1: Generate SBOM
 	fmt.Printf("  📋 Generating SBOM for %s...\n", relPath)
-	if !ctx.SkipSBOM {
-		sbom, err := ctx.SyftScanner.GenerateSBOM(scannerCtx, targetPath, nil)
-		if err != nil {
-			return fmt.Errorf("failed to generate SBOM: %w", err)
-		}
 
-		// Create SBOM record
-		sbomRecord = &models.SBOM{
-			RepoName:       repoName,
-			ModulePath:     relPath,
-			ScanDate:       time.Now(),
-			SyftVersion:    "latest", // TODO: Get actual version
-			RawSBOM:        string(sbom.RawSBOM),
-			ComponentCount: 0, // Will be updated after components are parsed
-		}
-
-		// Save SBOM to database
-		if err := ctx.Database.CreateSBOM(sbomRecord); err != nil {
-			return fmt.Errorf("failed to save SBOM: %w", err)
-		}
-
-		// Parse and save components
-		components, err := ctx.SyftScanner.ParseSBOMToComponents(sbomRecord)
-		if err != nil {
-			return fmt.Errorf("failed to parse SBOM components: %w", err)
-		}
-
-		// Update component count
-		if err := ctx.Database.UpdateSBOMComponentCount(sbomRecord.ID, len(components)); err != nil {
-			return fmt.Errorf("failed to update SBOM component count: %w", err)
-		}
-
-		// Save components to database
-		for _, comp := range components {
-			if err := ctx.Database.CreateComponent(comp); err != nil {
-				log.Printf("Warning: Failed to save component %s: %v", comp.Name, err)
-				continue
-			}
-			sbomComponents = append(sbomComponents, comp)
-		}
-
-		fmt.Printf("    ✓ SBOM generated with %d components\n", len(components))
-	} else {
-		fmt.Printf("    ⏭️  SBOM generation skipped\n")
-	}
-
-	// Step 2: Scan vulnerabilities
-	fmt.Printf("  🛡️  Scanning vulnerabilities for %s...\n", relPath)
-	if !ctx.SkipVuln {
-		vulns, err := ctx.GrypeScanner.ScanDirectory(scannerCtx, targetPath, nil)
-		if err != nil {
-			log.Printf("Warning: Failed to scan vulnerabilities: %v", err)
-		} else {
-			// Link vulnerabilities to components and save them
-			for _, vuln := range vulns {
-				// Find matching component by name (simple matching)
-				var componentID int
-				for _, comp := range sbomComponents {
-					// Simple name matching - in production, more sophisticated matching would be needed
-					if comp.Name != "" {
-						componentID = comp.ID
-						break
-					}
-				}
-
-				if componentID > 0 {
-					vuln.ComponentID = componentID
-					if err := ctx.Database.CreateVulnerability(vuln); err != nil {
-						log.Printf("Warning: Failed to save vulnerability %s: %v", vuln.VulnID, err)
-						continue
-					}
-					vulnerabilities = append(vulnerabilities, vuln)
-				}
-			}
-		}
-
-		fmt.Printf("    ✓ Vulnerability scan completed, found %d vulnerabilities\n", len(vulnerabilities))
-	} else {
-		fmt.Printf("    ⏭️  Vulnerability scan skipped\n")
-	}
-
-	// Step 3: Analyze policy compliance
-	fmt.Printf("  📏 Analyzing policy compliance for %s...\n", relPath)
-	var scanResult *models.ScanResult
-
-	if sbomRecord != nil {
-		result, err := ctx.PolicyEngine.EvaluateCompliance(sbomRecord, sbomComponents, vulnerabilities)
-		if err != nil {
-			log.Printf("Warning: Policy evaluation failed: %v", err)
-		} else {
-			// Convert policy evaluation result to scan result
-			scanResult = &models.ScanResult{
-				SBOMID:               sbomRecord.ID,
-				RepoName:             repoName,
-				ModulePath:           relPath,
-				ScanStartTime:        scanStartTime,
-				ScanEndTime:          time.Now(),
-				Status:               models.ScanStatusCompleted,
-				TotalComponents:      result.TotalComponents,
-				VulnerabilitiesFound: result.TotalVulnerabilities,
-				LicenseViolations:    result.Summary.LicenseViolations,
-				CriticalVulns:        result.Summary.CriticalViolations,
-				HighVulns:            result.Summary.HighViolations,
-				MediumVulns:          result.Summary.MediumViolations,
-				LowVulns:             result.Summary.LowViolations,
-			}
-
-			// Calculate overall risk
-			scanResult.OverallRisk = scanResult.CalculateOverallRisk()
-
-			if err := ctx.Database.CreateScanResult(scanResult); err != nil {
-				log.Printf("Warning: Failed to save scan result: %v", err)
-			}
-		}
-	}
-
-	fmt.Printf("    ✓ Policy analysis completed\n")
-
-	// Step 4: Send notifications
-	if ctx.Notify && ctx.Notifier != nil && scanResult != nil {
-		fmt.Printf("  📢 Sending notifications for %s...\n", relPath)
-
-		// Check if there are violations to report
-		if scanResult.VulnerabilitiesFound > 0 || scanResult.LicenseViolations > 0 {
-			message := fmt.Sprintf("🚨 OSS Compliance Issues Found in %s/%s\n\n", repoName, relPath)
-			message += fmt.Sprintf("📊 **Summary:**\n")
-			message += fmt.Sprintf("• Total Components: %d\n", scanResult.TotalComponents)
-			message += fmt.Sprintf("• Vulnerabilities: %d (Critical: %d, High: %d, Medium: %d, Low: %d)\n",
-				scanResult.VulnerabilitiesFound, scanResult.CriticalVulns, scanResult.HighVulns,
-				scanResult.MediumVulns, scanResult.LowVulns)
-			message += fmt.Sprintf("• License Violations: %d\n", scanResult.LicenseViolations)
-			message += fmt.Sprintf("• Overall Risk: %s\n", scanResult.OverallRisk)
-
-			if err := ctx.Notifier.SendCustomMessage(message, ""); err != nil {
-				log.Printf("Warning: Failed to send notification: %v", err)
-			}
-		}
-
-		fmt.Printf("    ✓ Notifications sent\n")
-	} else if ctx.Notify {
-		fmt.Printf("  📢 Notifications for %s...\n", relPath)
-		fmt.Printf("    ⏭️  No violations found or notifier not configured\n")
-	}
-
-	return nil
-}
-
-// generateSummaryReport generates and displays a summary of all scan results
-func generateSummaryReport(ctx *ScanContext) error {
-	// Get latest scan results
-	results, err := ctx.Database.GetLatestScanResults(10)
+	err := ctx.SyftScanner.GenerateSBOM(context.Background(), targetPath)
 	if err != nil {
-		return fmt.Errorf("failed to get scan results: %w", err)
+		return fmt.Errorf("failed to generate SBOM: %w", err)
 	}
-
-	if len(results) == 0 {
-		fmt.Println("No scan results found.")
-		return nil
-	}
-
-	fmt.Printf("\n📋 **Scan Summary Report**\n")
-	fmt.Printf("========================\n")
-
-	totalComponents := 0
-	totalVulns := 0
-	totalLicenseViolations := 0
-
-	for _, result := range results {
-		fmt.Printf("\n🔍 **%s/%s**\n", result.RepoName, result.ModulePath)
-		fmt.Printf("  • Components: %d\n", result.TotalComponents)
-		fmt.Printf("  • Vulnerabilities: %d (C:%d, H:%d, M:%d, L:%d)\n",
-			result.VulnerabilitiesFound, result.CriticalVulns, result.HighVulns,
-			result.MediumVulns, result.LowVulns)
-		fmt.Printf("  • License Violations: %d\n", result.LicenseViolations)
-		fmt.Printf("  • Risk Level: %s\n", result.OverallRisk)
-		fmt.Printf("  • Scan Time: %s\n", result.ScanStartTime.Format("2006-01-02 15:04:05"))
-
-		totalComponents += result.TotalComponents
-		totalVulns += result.VulnerabilitiesFound
-		totalLicenseViolations += result.LicenseViolations
-	}
-
-	fmt.Printf("\n📊 **Overall Summary**\n")
-	fmt.Printf("• Total Scanned Components: %d\n", totalComponents)
-	fmt.Printf("• Total Vulnerabilities: %d\n", totalVulns)
-	fmt.Printf("• Total License Violations: %d\n", totalLicenseViolations)
 
 	return nil
 }
