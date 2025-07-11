@@ -1,3 +1,6 @@
 *.json
 dtrack-data/
 postgres-data/
+*.log
+*.db
+.env

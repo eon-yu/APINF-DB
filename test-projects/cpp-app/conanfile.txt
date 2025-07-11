@@ -1,0 +1,25 @@
+[requires]
+openssl/1.1.1k
+libcurl/7.80.0
+zlib/1.2.11
+boost/1.78.0
+nlohmann_json/3.10.5
+spdlog/1.9.2
+fmt/8.1.1
+gtest/1.11.0
+
+[generators]
+cmake
+cmake_deps
+cmake_find_package
+
+[options]
+openssl:shared=True
+libcurl:shared=True
+zlib:shared=True
+boost:shared=True
+
+[imports]
+bin, *.dll -> ./bin
+lib, *.dylib* -> ./bin
+lib, *.so* -> ./bin 

@@ -9,11 +9,23 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
+)
+
+const (
+	dtrackURL = "http://localhost:8081/api/v1/bom"
 )
 
 // Syft로 SBOM 생성
-func generateSBOM(modulePath, sbomFile string) error {
-	cmd := exec.Command("syft", "dir:"+modulePath, "--output", "cyclonedx-json@1.5="+sbomFile)
+func generateSBOM(filePath, sbomFile string) error {
+	cmd := exec.Command("syft", "file:"+filePath, "--output", "cyclonedx-json@1.5="+sbomFile)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func generateSBOMWithCycloneDX(filePath, sbomFile string) error {
+	cmd := exec.Command("npx", "@cyclonedx/cdxgen", "-t", filePath, "-o", sbomFile, "--output-format", "json", "--spec-version", "1.5")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -36,13 +48,14 @@ func patchSBOMProjectName(sbomFile, projectName string) error {
 			component["name"] = projectName
 			metadata["component"] = component
 		} else {
-			metadata["component"] = map[string]any{"name": projectName}
+			metadata["component"] = map[string]any{"name": projectName, "type": "application"}
 		}
 		obj["metadata"] = metadata
 	} else {
 		obj["metadata"] = map[string]any{
 			"component": map[string]any{
 				"name": projectName,
+				"type": "library",
 			},
 		}
 	}
@@ -57,21 +70,21 @@ func patchSBOMProjectName(sbomFile, projectName string) error {
 
 // Dependency-Track에 SBOM 업로드
 func uploadSBOM(sbomFile, moduleName string) error {
-	cmd := exec.Command("cyclonedx",
-		"convert", "--input-file", sbomFile, "--output-file", sbomFile,
-		"--output-format", "json", "--output-version", "v1_5")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		return err
+	if !strings.Contains(sbomFile, "Dockerfile") && !strings.Contains(sbomFile, "CMakeLists.txt") {
+		cmd := exec.Command("cyclonedx",
+			"convert", "--input-file", sbomFile, "--output-file", sbomFile,
+			"--output-format", "json", "--output-version", "v1_5")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			return err
+		}
 	}
-
 	data, err := os.ReadFile(sbomFile)
 	if err != nil {
 		panic(err)
 	}
-	defer os.Remove(sbomFile)
 	// 2. base64 인코딩
 	encoded := base64.StdEncoding.EncodeToString(data)
 
@@ -79,14 +92,15 @@ func uploadSBOM(sbomFile, moduleName string) error {
 	reqBody := map[string]any{
 		"projectName":    moduleName,
 		"projectVersion": "latest",
-		"parentName":     "iq2-square",
+		"parentName":     parentName,
+		"parentVersion":  parentVersion,
 		"autoCreate":     true,
 		"bom":            encoded,
 	}
 	jsonData, _ := json.Marshal(reqBody)
 
 	// 4. HTTP POST 호출
-	req, _ := http.NewRequest("PUT", "http://localhost:8081/api/v1/bom", bytes.NewBuffer(jsonData))
+	req, _ := http.NewRequest("PUT", dtrackURL, bytes.NewBuffer(jsonData))
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Api-Key", apiKey)

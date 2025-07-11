@@ -1,0 +1,1 @@
+go run . -parent iq2_square -root /Users/stclab/Desktop/IQ-square
