@@ -12,10 +12,6 @@ import (
 	"strings"
 )
 
-const (
-	dtrackURL = "http://localhost:8081/api/v1/bom"
-)
-
 // Syft로 SBOM 생성
 func generateSBOM(filePath, sbomFile string) error {
 	cmd := exec.Command("syft", "file:"+filePath, "--output", "cyclonedx-json@1.5="+sbomFile)

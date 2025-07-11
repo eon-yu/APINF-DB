@@ -68,7 +68,8 @@ docker compose up -d
 
 ```ini
 # Dependency-Track API Key
-API_KEY=<발급받은 값>
+DP_TRACK_API_KEY=<발급받은 값>
+DP_TRACK_SERVER_HOST=<DP TRACK SERVER HOST>
 ```
 
 ## 🚀 사용 방법
@@ -78,7 +79,7 @@ API_KEY=<발급받은 값>
 ```bash
 # 예시: /path/to/project 전체를 스캔하여 iq2_square 라는 부모 프로젝트로 업로드
 
-go run . -root /path/to/project -parent iq2_square -parent-version 1.0.0
+go run . -parent test --parent-version latest -root /Users/stclab/Desktop/IQ-square -docker-image test:latest
 ```
 
 인자 설명:

@@ -13,6 +13,7 @@ import (
 
 const fileName = "-bom.json"
 
+var dtrackURL string = ""
 var apiKey string = ""
 var parentName string
 var parentVersion string
@@ -23,10 +24,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("환경 변수 파일 로드 실패: %v", err)
 	}
-	apiKey = os.Getenv("API_KEY")
+	serverHost := os.Getenv("DP_TRACK_SERVER_HOST")
+	if serverHost == "" {
+		panic("SERVER_HOST 환경 변수가 설정되지 않았습니다.")
+	}
+	dtrackURL = "http://" + serverHost + ":8081/api/v1/bom"
+
+	apiKey = os.Getenv("DP_TRACK_API_KEY")
 	if apiKey == "" {
 		panic("API_KEY 환경 변수가 설정되지 않았습니다.")
 	}
+	fmt.Println(dtrackURL)
+	fmt.Println(apiKey)
 
 	rootDirPtr := flag.String("root", rootDir, "멀티 모듈 루트 디렉토리")
 	parentNamePtr := flag.String("parent", "", "부모 모듈 이름")
