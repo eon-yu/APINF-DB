@@ -16,7 +16,7 @@ const fileName = "-bom.json"
 var apiKey string = ""
 var parentName string
 var parentVersion string
-var rootDir string = "/Users/stclab/Desktop/IQ-square"
+var rootDir string = ""
 
 func main() {
 	err := godotenv.Load(".env")
@@ -31,6 +31,7 @@ func main() {
 	rootDirPtr := flag.String("root", rootDir, "멀티 모듈 루트 디렉토리")
 	parentNamePtr := flag.String("parent", "", "부모 모듈 이름")
 	parentVersionPtr := flag.String("parent-version", "latest", "부모 모듈 버전")
+	dockerImg := flag.String("docker-image", "", "Docker Image 이름")
 	flag.Parse()
 
 	if *parentNamePtr == "" {
@@ -40,7 +41,19 @@ func main() {
 	parentName = *parentNamePtr
 	parentVersion = *parentVersionPtr
 	rootDir = *rootDirPtr
-
+	if *dockerImg != "" {
+		if len(strings.Split(*dockerImg, ":")) == 2 {
+			runTask(rootDir, *dockerImg, "")
+		} else {
+			panic("Docker Image 이름이 올바르지 않습니다.")
+		}
+	}
+	if *dockerImg == "" && *rootDirPtr == "" {
+		panic("멀티/단일 모듈 루트 디렉토리 또는 Docker Image 이름이 필요합니다.")
+	}
+	if *rootDirPtr == "" {
+		return
+	}
 	err = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -66,12 +79,12 @@ func runTask(path string, moduleName string, libName string) error {
 	sbomFile := fmt.Sprintf("./%s-%s%s", moduleName, libName, fileName)
 	projectName := fmt.Sprintf("%s(%s)", moduleName, libName)
 	fmt.Printf("🔍 [%s] Syft 스캔 시작\n", moduleName)
-	if strings.Contains(libName, "Dockerfile") {
-		projectName = fmt.Sprintf("%s(%s)", moduleName, "Dockerfile")
+	switch libName {
+	case "CMakeLists.txt":
 		err = generateSBOMWithCycloneDX(filepath.Join(path, libName), sbomFile)
-	} else if libName == "CMakeLists.txt" {
-		err = generateSBOMWithCycloneDX(filepath.Join(path, libName), sbomFile)
-	} else {
+	case "":
+		err = generateSBOMWithDockerImage(moduleName, sbomFile)
+	default:
 		err = generateSBOM(filepath.Join(path, libName), sbomFile)
 	}
 	defer os.Remove(sbomFile)
@@ -119,7 +132,6 @@ func hasPkgManagerFile(dir string) []string {
 		"vcpkg.json",
 	}
 	cFile := "CMakeLists.txt"
-	dockerFile := "Dockerfile"
 	result := []string{}
 
 	for _, f := range files {
@@ -129,13 +141,6 @@ func hasPkgManagerFile(dir string) []string {
 	}
 	if _, err := os.Stat(filepath.Join(dir, cFile)); err == nil {
 		result = append(result, cFile)
-	}
-	entries, _ := os.ReadDir(dir)
-
-	for _, entry := range entries {
-		if strings.Contains(entry.Name(), dockerFile) {
-			result = append(result, entry.Name())
-		}
 	}
 	if len(result) != 0 {
 		fmt.Println(dir, ":", result)

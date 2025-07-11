@@ -31,6 +31,13 @@ func generateSBOMWithCycloneDX(filePath, sbomFile string) error {
 	return cmd.Run()
 }
 
+func generateSBOMWithDockerImage(dockerImg, sbomFile string) error {
+	cmd := exec.Command("syft", dockerImg, "--output", "cyclonedx-json@1.5="+sbomFile)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // SBOM에 projectName 주입
 func patchSBOMProjectName(sbomFile, projectName string) error {
 	data, err := os.ReadFile(sbomFile)
@@ -41,6 +48,20 @@ func patchSBOMProjectName(sbomFile, projectName string) error {
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
+	}
+	// Grafana v.11 처리
+	if component, ok := obj["components"].([]any); ok {
+		for _, c := range component {
+			if c, ok := c.(map[string]any); ok {
+				if name, ok := c["name"].(string); ok {
+					if strings.Contains(name, "github.com/grafana/grafana") {
+						c["version"] = "v11.0.0"
+						c["purl"] = c["purl"].(string) + "@v11.0.0"
+						c["cpe"] = "cpe:2.3:a:grafana:grafana:v11.0.0:*:*:*:*:*:*:*"
+					}
+				}
+			}
+		}
 	}
 
 	if metadata, ok := obj["metadata"].(map[string]any); ok {
@@ -70,7 +91,10 @@ func patchSBOMProjectName(sbomFile, projectName string) error {
 
 // Dependency-Track에 SBOM 업로드
 func uploadSBOM(sbomFile, moduleName string) error {
-	if !strings.Contains(sbomFile, "Dockerfile") && !strings.Contains(sbomFile, "CMakeLists.txt") {
+	if strings.HasSuffix(moduleName, "()") {
+		moduleName = strings.TrimSuffix(moduleName, "()")
+		moduleName = moduleName + "(dockerImage)"
+	} else if !strings.Contains(sbomFile, "CMakeLists.txt") {
 		cmd := exec.Command("cyclonedx",
 			"convert", "--input-file", sbomFile, "--output-file", sbomFile,
 			"--output-format", "json", "--output-version", "v1_5")

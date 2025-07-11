@@ -98,7 +98,6 @@ services:
       ALPINE_DATABASE_DRIVER: "org.postgresql.Driver"
       ALPINE_DATABASE_USERNAME: "dtrack"
       ALPINE_DATABASE_PASSWORD: "dtrack"
-      ALPINE_RESET_ADIMN: true
     deploy:
       resources:
         limits:
