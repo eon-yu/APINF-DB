@@ -37,7 +37,7 @@ func runTask(path string, moduleName string, libName string) error {
 		log.Printf("❌ [%s] Syft 스캔 실패: %v\n", projectName, err)
 		return err
 	}
-	if err = runGrype(sbomFile, projectName); err != nil {
+	if err = runGrype(sbomFile); err != nil {
 		log.Printf("❌ [%s] Grype 실패: %v\n", projectName, err)
 		return err
 	}

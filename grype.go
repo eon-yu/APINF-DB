@@ -40,9 +40,9 @@ type GrypeResult struct {
 
 const grypeDir = "./grype"
 
-func runGrype(sbomFile, projectName string) error {
+func runGrype(sbomFile string) error {
 
-	grypeFile := filepath.Join(grypeDir, projectName+"_"+sbomFile)
+	grypeFile := filepath.Join(grypeDir, sbomFile)
 	err := generateGrype(sbomFile)
 	if err != nil {
 		return err
