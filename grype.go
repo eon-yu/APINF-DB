@@ -67,7 +67,7 @@ func runGrype(sbomFile string) error {
 	} else {
 		newCVEs = diffCVEList(currentCVE, previousCVE)
 	}
-	if err := sendSlackWebhook(newCVEs, projectName+"-"+strings.ReplaceAll(sbomFile, sbomFileName, "")); err != nil {
+	if err := sendSlackWebhook(newCVEs, strings.ReplaceAll(sbomFile, sbomFileName, "")); err != nil {
 		fmt.Println("❌ 슬랙 전송 실패:", err)
 	}
 	return nil
