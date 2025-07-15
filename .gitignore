@@ -4,3 +4,4 @@ postgres-data/
 *.log
 *.db
 .env
+jenkinsfile

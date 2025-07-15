@@ -65,9 +65,11 @@ func patchSBOMProjectName(sbomFile, projectName string) error {
 
 // Dependency-Track에 SBOM 업로드
 func uploadSBOM(sbomFile, moduleName string) error {
-	if strings.HasSuffix(moduleName, "()") {
+	if strings.Contains(moduleName, "()") {
 		moduleName = strings.TrimSuffix(moduleName, "()")
+		moduleName = strings.Split(moduleName, ":")[0]
 		moduleName = moduleName + "(dockerImage)"
+
 	} else if !strings.Contains(sbomFile, "CMakeLists.txt") {
 		cmd := exec.Command("cyclonedx",
 			"convert", "--input-file", sbomFile, "--output-file", sbomFile,
