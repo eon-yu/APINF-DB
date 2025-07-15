@@ -12,28 +12,6 @@ import (
 	"strings"
 )
 
-// Syft로 SBOM 생성
-func generateSBOM(filePath, sbomFile string) error {
-	cmd := exec.Command("syft", "file:"+filePath, "--output", "cyclonedx-json@1.5="+sbomFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func generateSBOMWithCycloneDX(filePath, sbomFile string) error {
-	cmd := exec.Command("npx", "@cyclonedx/cdxgen", "-t", filePath, "-o", sbomFile, "--output-format", "json", "--spec-version", "1.5")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func generateSBOMWithDockerImage(dockerImg, sbomFile string) error {
-	cmd := exec.Command("syft", dockerImg, "--output", "cyclonedx-json@1.5="+sbomFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
 // SBOM에 projectName 주입
 func patchSBOMProjectName(sbomFile, projectName string) error {
 	data, err := os.ReadFile(sbomFile)
