@@ -17,6 +17,7 @@
 | 구성 요소 | 용도 |
 |-----------|------|
 | [Syft](https://github.com/anchore/syft) | 파일 시스템·컨테이너 이미지·디렉터리 스캔 후 SBOM 생성 |
+| [Grype](https://github.com/anchore/grype) | SBOM 취약성 분석 - 슬랙 알림을 위한 |
 | [CycloneDX CLI](https://github.com/CycloneDX/cyclonedx-cli) | SBOM 변환·검증·정렬 |
 | [cdxgen](https://github.com/CycloneDX/cdxgen) | C/C++, Dockerfile 등 Syft가 지원하지 않는 대상의 SBOM 생성 |
 | [Dependency-Track](https://dependencytrack.org/) | SBOM 저장·시각화·취약점 상관분석 |
@@ -33,6 +34,8 @@ brew install go  # Go >= 1.23
 brew install syft
 brew install cyclonedx/cyclonedx/cyclonedx-cli
 npm install -g @cyclonedx/cdxgen  # 또는 npx 사용 가능
+brew tap anchore/grype
+brew install grype
 ```
 
 Linux(Ubuntu 예시):
@@ -104,7 +107,11 @@ go run . -parent test --parent-version latest -root /Users/stclab/Desktop/IQ-squ
 
 ```
 ├── main.go             # 엔트리포인트 (CLI)
-├── dp-track.go         # SBOM 생성·패치·업로드 로직
+├── dp-track.go         # DP Track업로드 로직
+├── slack.go            # Slack 알림 로직
+├── syft.go             # SBOM 생성 로직
+├── cyclonedx.go        # SBOM 패치 로직
+├── grype.go            # SBOM을 통한 취약성 분석
 ├── docker-compose.yml  # Dependency-Track 스택
 ├── start.sh            # 예시 실행 스크립트
 ├── init.sh             # 필수 툴 설치 스크립트(macOS)
