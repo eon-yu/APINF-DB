@@ -11,18 +11,64 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const fileName = "-bom.json"
+const sbomFileName = "-bom.json"
 
 var dtrackURL string = ""
 var apiKey string = ""
 var parentName string
 var parentVersion string
 var rootDir string = ""
+var slackWebhookURL string = ""
+
+func runTask(path string, moduleName string, libName string) error {
+	var err error
+	sbomFile := fmt.Sprintf("./%s-%s%s", moduleName, libName, sbomFileName)
+	projectName := fmt.Sprintf("%s(%s)", moduleName, libName)
+	fmt.Printf("🔍 [%s] Syft 스캔 시작\n", moduleName)
+	switch libName {
+	case "CMakeLists.txt":
+		err = generateSBOMWithCycloneDX(filepath.Join(path, libName), sbomFile)
+	case "":
+		err = generateSBOMWithDockerImage(moduleName, sbomFile)
+	default:
+		err = generateSBOM(filepath.Join(path, libName), sbomFile)
+	}
+	if err != nil {
+		log.Printf("❌ [%s] Syft 스캔 실패: %v\n", projectName, err)
+		return err
+	}
+	if err = runGrype(sbomFile, projectName); err != nil {
+		log.Printf("❌ [%s] Grype 실패: %v\n", projectName, err)
+		return err
+	}
+	defer os.Remove(sbomFile)
+
+	fmt.Printf("📝 [%s] SBOM에 projectName 패치\n", projectName)
+	err = patchSBOMProjectName(sbomFile, projectName)
+	if err != nil {
+		log.Printf("❌ [%s] SBOM 패치 실패: %v\n", projectName, err)
+		return err
+	}
+
+	fmt.Printf("🚀 [%s] Dependency-Track 업로드 시작\n", projectName)
+	err = uploadSBOM(sbomFile, projectName)
+	if err != nil {
+		log.Printf("❌ [%s] Dependency-Track 업로드 실패: %v\n", projectName, err)
+	} else {
+		fmt.Printf("✅ [%s] 업로드 완료\n", projectName)
+	}
+
+	return nil
+}
 
 func main() {
 	err := godotenv.Load(".env")
 	if err != nil {
 		log.Fatalf("환경 변수 파일 로드 실패: %v", err)
+	}
+	slackWebhookURL = os.Getenv("SLACK_WEBHOOK_URL")
+	if slackWebhookURL == "" {
+		panic("SLACK_WEBHOOK_URL 환경 변수가 설정되지 않았습니다.")
 	}
 	serverHost := os.Getenv("DP_TRACK_SERVER_HOST")
 	if serverHost == "" {
@@ -63,6 +109,11 @@ func main() {
 	if *rootDirPtr == "" {
 		return
 	}
+
+	err = mkGrypeDir()
+	if err != nil {
+		panic(err)
+	}
 	err = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -81,78 +132,4 @@ func main() {
 	if err != nil {
 		log.Fatalf("파일 탐색 실패: %v", err)
 	}
-}
-
-func runTask(path string, moduleName string, libName string) error {
-	var err error
-	sbomFile := fmt.Sprintf("./%s-%s%s", moduleName, libName, fileName)
-	projectName := fmt.Sprintf("%s(%s)", moduleName, libName)
-	fmt.Printf("🔍 [%s] Syft 스캔 시작\n", moduleName)
-	switch libName {
-	case "CMakeLists.txt":
-		err = generateSBOMWithCycloneDX(filepath.Join(path, libName), sbomFile)
-	case "":
-		err = generateSBOMWithDockerImage(moduleName, sbomFile)
-	default:
-		err = generateSBOM(filepath.Join(path, libName), sbomFile)
-	}
-	defer os.Remove(sbomFile)
-	if err != nil {
-		log.Printf("❌ [%s] Syft 스캔 실패: %v\n", projectName, err)
-		return err
-	}
-
-	fmt.Printf("📝 [%s] SBOM에 projectName 패치\n", projectName)
-	err = patchSBOMProjectName(sbomFile, projectName)
-	if err != nil {
-		log.Printf("❌ [%s] SBOM 패치 실패: %v\n", projectName, err)
-		return err
-	}
-
-	fmt.Printf("🚀 [%s] Dependency-Track 업로드 시작\n", projectName)
-	err = uploadSBOM(sbomFile, projectName)
-	if err != nil {
-		log.Printf("❌ [%s] Dependency-Track 업로드 실패: %v\n", projectName, err)
-	} else {
-		fmt.Printf("✅ [%s] 업로드 완료\n", projectName)
-	}
-
-	return nil
-}
-
-func hasPkgManagerFile(dir string) []string {
-	files := []string{
-		"go.mod",
-		"Cargo.toml",
-		"requirements.txt",
-		"setup.py",
-		"Pipfile",
-		"package-lock.json",
-		"pom.xml",
-		"build.gradle",
-		"build.gradle.kts",
-		"build.sbt",
-		"build.xml",
-		"Makefile",
-		"meson.build",
-		"meson_options.txt",
-		"conanfile.txt",
-		"conanfile.py",
-		"vcpkg.json",
-	}
-	cFile := "CMakeLists.txt"
-	result := []string{}
-
-	for _, f := range files {
-		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
-			result = append(result, f)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, cFile)); err == nil {
-		result = append(result, cFile)
-	}
-	if len(result) != 0 {
-		fmt.Println(dir, ":", result)
-	}
-	return result
 }
