@@ -47,7 +47,6 @@ func sendSlackWebhook(cves map[string]GrypeResult, service string) error {
 			desc = strings.Split(desc, "\n")[0]
 		}
 		msg.WriteString(fmt.Sprintf("  ➤ _%s_\n\n", desc))
-		cveCount++
 	}
 	sendSlackWebhookAPI(msg)
 	return nil
