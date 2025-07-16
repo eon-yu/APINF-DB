@@ -29,6 +29,8 @@ func runTask(path string, moduleName string, libName string) error {
 	case "CMakeLists.txt":
 		err = generateSBOMWithCycloneDX(filepath.Join(path, libName), sbomFile)
 	case "":
+		moduleName = strings.Split(moduleName, ":")[0]
+		sbomFile = fmt.Sprintf("./%s%s", moduleName, sbomFileName)
 		err = generateSBOMWithDockerImage(moduleName, sbomFile)
 	default:
 		err = generateSBOM(filepath.Join(path, libName), sbomFile)
