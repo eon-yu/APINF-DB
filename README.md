@@ -1,6 +1,6 @@
 # OSS Compliance Scanner
 
-> Syft, CycloneDX SBOM, 그리고 Dependency-Track을 활용한 멀티-모듈 소프트웨어 구성 분석 자동화 도구
+> Syft, CycloneDX SBOM, Grype 그리고 Dependency-Track을 활용한 멀티-모듈 소프트웨어 구성 분석 자동화 도구
 
 ---
 
@@ -73,6 +73,7 @@ docker compose up -d
 # Dependency-Track API Key
 DP_TRACK_API_KEY=<발급받은 값>
 DP_TRACK_SERVER_HOST=<DP TRACK SERVER HOST>
+SLACK_WEBHOOK_URL=<WEBHOOK URL>
 ```
 
 ## 🚀 사용 방법
@@ -112,6 +113,7 @@ go run . -parent test --parent-version latest -root /Users/stclab/Desktop/IQ-squ
 ├── syft.go             # SBOM 생성 로직
 ├── cyclonedx.go        # SBOM 패치 로직
 ├── grype.go            # SBOM을 통한 취약성 분석
+├── cve.go            # NVD 크롤링을 통한 2중 취약성 분석
 ├── docker-compose.yml  # Dependency-Track 스택
 ├── start.sh            # 예시 실행 스크립트
 ├── init.sh             # 필수 툴 설치 스크립트(macOS)
