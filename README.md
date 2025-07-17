@@ -120,13 +120,28 @@ go run . -parent test --parent-version latest -root /Users/stclab/Desktop/IQ-squ
 └── client/             # 추후 Web 클라이언트(미사용)
 ```
 
-## 🛠️ 개발 & 테스트
+## 🛠️ 업데이트 노트
+### v1.0.0
+- Syft + Cyclonedx + Dependency Track
+- Syft와 Cyclonedx를 활용한 SBOM 생성
+- Dependency Track을 활용한 Dashboard UI 및 슬랙 알림 설정
 
-1. 의존성 설치: `go mod tidy`
-2. 코드 포맷팅: `go fmt ./...`
-3. (테스트 케이스 추가 시) `go test ./...`
+### v1.1.0
+- 슬랙 알림을 위한 Grype 추가
+- 슬랙 알림 기능 Dependency Track -> Golang Pipeline(Grype + slack)
 
-현재 저장소에는 테스트 코드가 존재하지 않습니다. 기능 확장 시 `*_test.go` 파일을 추가해 주세요.
+### v1.1.1
+- Risk Score가 0이 나오는 문제 해결
+- NVD API 및 크롤링을 활용한 3중 조회
+
+### v1.1.2
+- Slack 알람 순서 정렬 - 같은 서비스내에 Risk Score 내림차순 순으로 정렬해서 전송 
+
+
+
+
+
+
 
 ## 📝 라이선스
 
