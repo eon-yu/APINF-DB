@@ -129,6 +129,7 @@ go run . -parent test --parent-version latest -root /Users/stclab/Desktop/IQ-squ
 ### v1.1.0
 - 슬랙 알림을 위한 Grype 추가
 - 슬랙 알림 기능 Dependency Track -> Golang Pipeline(Grype + slack)
+- 슬랙 웹훅 전송시, 잘림 현상 방지를 위한 배치 전송(슬랙 최대 : 4만자 / 메세지 전송 : 3만자)
 
 ### v1.1.1
 - Risk Score가 0이 나오는 문제 해결
