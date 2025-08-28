@@ -38,7 +38,7 @@ type GrypeResult struct {
 	Seen        bool        `json:"seen"`
 }
 
-const grypeDir = "./grype"
+const grypeDir = "/tmp/grype"
 
 func runGrype(sbomFile string) error {
 
