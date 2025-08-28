@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 type Match struct {
@@ -59,15 +61,15 @@ func runGrype(sbomFile string) error {
 	} else {
 		firstRun = true
 	}
-	// var newCVEs map[string]GrypeResult
+	var newCVEs map[string]GrypeResult
 	if firstRun {
-		// newCVEs = currentCVE
+		newCVEs = currentCVE
 	} else {
-		_ = diffCVEList(currentCVE, previousCVE)
+		newCVEs = diffCVEList(currentCVE, previousCVE)
 	}
-	// if err := sendSlackWebhook(newCVEs, strings.ReplaceAll(sbomFile, sbomFileName, "")); err != nil {
-	// fmt.Println("❌ 슬랙 전송 실패:", err)
-	// }
+	if err := sendSlackWebhook(newCVEs, strings.ReplaceAll(sbomFile, sbomFileName, "")); err != nil {
+		fmt.Println("❌ 슬랙 전송 실패:", err)
+	}
 	return nil
 }
 
